@@ -435,6 +435,9 @@ export function HomeScreen({ userName }: HomeScreenProps) {
     const searchScale = useRef(new Animated.Value(1)).current;
     const scrollY = useRef(new Animated.Value(0)).current;
     const actionScrollX = useRef(new Animated.Value(0)).current;
+    const topBarTranslateY = useRef(new Animated.Value(0)).current;
+    const lastScrollY = useRef(0);
+    const isScrollingDown = useRef(false);
 
     const [activeNav, setActiveNav] = useState<'home' | 'scan' | 'about' | 'profile'>('home');
     
@@ -449,6 +452,30 @@ export function HomeScreen({ userName }: HomeScreenProps) {
     const scanLabelTranslateY = useRef(new Animated.Value(0)).current; // inactive labels start visible
     const aboutLabelTranslateY = useRef(new Animated.Value(0)).current;
     const profileLabelTranslateY = useRef(new Animated.Value(0)).current;
+    
+    // Animated values for icon scales and glow
+    const homeIconScale = useRef(new Animated.Value(1.15)).current;
+    const scanIconScale = useRef(new Animated.Value(1)).current;
+    const aboutIconScale = useRef(new Animated.Value(1)).current;
+    const profileIconScale = useRef(new Animated.Value(1)).current;
+    
+    const homeGlowOpacity = useRef(new Animated.Value(1)).current;
+    const scanGlowOpacity = useRef(new Animated.Value(0)).current;
+    const aboutGlowOpacity = useRef(new Animated.Value(0)).current;
+    const profileGlowOpacity = useRef(new Animated.Value(0)).current;
+    
+    const homeUnderlineScale = useRef(new Animated.Value(1)).current;
+    const scanUnderlineScale = useRef(new Animated.Value(0)).current;
+    const aboutUnderlineScale = useRef(new Animated.Value(0)).current;
+    const profileUnderlineScale = useRef(new Animated.Value(0)).current;
+    
+    // Animated value for underline and glow position (translateX)
+    // Initialize based on home being active (index 0)
+    const navWidth = Math.min(screenWidth * 0.92, 400);
+    const contentWidth = navWidth - 24; // Account for padding
+    const itemWidth = contentWidth / 4;
+    const initialUnderlinePosition = 12 + (0 * itemWidth) + (itemWidth / 2) - 20; // Home is at index 0, add padding offset
+    const underlineTranslateX = useRef(new Animated.Value(initialUnderlinePosition)).current;
     
     // Animated values for page transitions
     const homePageOpacity = useRef(new Animated.Value(1)).current;
@@ -506,7 +533,7 @@ export function HomeScreen({ userName }: HomeScreenProps) {
     };
     
     // Create dynamic styles based on theme
-    const styles = createStyles(COLORS);
+    const styles = createStyles(COLORS, isDarkTheme);
     
     // Get action cards with translations
     const actionCards = [
@@ -627,8 +654,8 @@ export function HomeScreen({ userName }: HomeScreenProps) {
 
     // Animate navigation labels when activeNav changes
     useEffect(() => {
-        const animationDuration = 300;
-        const easing = Easing.out(Easing.cubic);
+        const animationDuration = 350;
+        const easing = Easing.bezier(0.4, 0.0, 0.2, 1);
 
         // Get all label animations
         const labelAnims: Array<{
@@ -642,10 +669,18 @@ export function HomeScreen({ userName }: HomeScreenProps) {
             { opacity: profileLabelOpacity, translateY: profileLabelTranslateY, isActive: activeNav === 'profile' },
         ];
 
+        // Icon scale and glow animations
+        const iconScales = [
+            { scale: homeIconScale, glow: homeGlowOpacity, underline: homeUnderlineScale, isActive: activeNav === 'home' },
+            { scale: scanIconScale, glow: scanGlowOpacity, underline: scanUnderlineScale, isActive: activeNav === 'scan' },
+            { scale: aboutIconScale, glow: aboutGlowOpacity, underline: aboutUnderlineScale, isActive: activeNav === 'about' },
+            { scale: profileIconScale, glow: profileGlowOpacity, underline: profileUnderlineScale, isActive: activeNav === 'profile' },
+        ];
+
         // Animate all labels
         // Active tab: fade out and slide down (opacity 0, translateY 8)
         // Inactive tabs: fade in and slide up (opacity 1, translateY 0)
-        const animations = labelAnims.map(({ opacity, translateY, isActive }) => {
+        const labelAnimations = labelAnims.map(({ opacity, translateY, isActive }) => {
             return Animated.parallel([
                 Animated.timing(opacity, {
                     toValue: isActive ? 0 : 1, // Active = hidden, Inactive = visible
@@ -662,9 +697,81 @@ export function HomeScreen({ userName }: HomeScreenProps) {
             ]);
         });
 
-        Animated.parallel(animations).start();
+        // Animate icon scales
+        const iconAnimations = iconScales.map(({ scale, isActive }) => {
+            return Animated.spring(scale, {
+                toValue: isActive ? 1.15 : 1,
+                tension: 180,
+                friction: 12,
+                useNativeDriver: true,
+            });
+        });
+
+        // Calculate underline and glow position based on active tab
+        // Use the same calculation as onLayout for consistency
+        const tabOrder: Array<'home' | 'scan' | 'about' | 'profile'> = ['home', 'scan', 'about', 'profile'];
+        const activeIndex = tabOrder.indexOf(activeNav);
+        const screenWidth = Dimensions.get('window').width;
+        const navWidth = Math.min(screenWidth * 0.92, 400);
+        // Content width accounts for padding (12px each side)
+        const contentWidth = navWidth - 24;
+        const itemWidth = contentWidth / 4;
+        // Position at center of each tab, offset by half the underline width (20px) to center it
+        // Add 12px for left padding
+        const underlinePosition = 12 + (activeIndex * itemWidth) + (itemWidth / 2) - 20;
+
+        // Animate underline position
+        const underlineAnimation = Animated.spring(underlineTranslateX, {
+            toValue: underlinePosition,
+            tension: 200,
+            friction: 20,
+            useNativeDriver: true,
+        });
+
+        Animated.parallel([...labelAnimations, ...iconAnimations, underlineAnimation]).start();
     }, [activeNav, homeLabelOpacity, scanLabelOpacity, aboutLabelOpacity, profileLabelOpacity, 
-        homeLabelTranslateY, scanLabelTranslateY, aboutLabelTranslateY, profileLabelTranslateY]);
+        homeLabelTranslateY, scanLabelTranslateY, aboutLabelTranslateY, profileLabelTranslateY,
+        homeIconScale, scanIconScale, aboutIconScale, profileIconScale,
+        underlineTranslateX]);
+
+    // Handle scroll to show/hide top bar
+    const handleScroll = (event: any) => {
+        const currentScrollY = event.nativeEvent.contentOffset.y;
+        const scrollDifference = currentScrollY - lastScrollY.current;
+
+        // Threshold to prevent jitter
+        const threshold = 5;
+        
+        if (Math.abs(scrollDifference) < threshold) {
+            return;
+        }
+
+        if (scrollDifference > 0 && currentScrollY > 50) {
+            // Scrolling down - hide top bar
+            if (!isScrollingDown.current) {
+                isScrollingDown.current = true;
+                Animated.spring(topBarTranslateY, {
+                    toValue: -100,
+                    tension: 100,
+                    friction: 8,
+                    useNativeDriver: true,
+                }).start();
+            }
+        } else if (scrollDifference < 0 || currentScrollY <= 50) {
+            // Scrolling up or near top - show top bar
+            if (isScrollingDown.current || currentScrollY <= 50) {
+                isScrollingDown.current = false;
+                Animated.spring(topBarTranslateY, {
+                    toValue: 0,
+                    tension: 100,
+                    friction: 8,
+                    useNativeDriver: true,
+                }).start();
+            }
+        }
+
+        lastScrollY.current = currentScrollY;
+    };
 
     // Animate page transitions when activeNav changes
     useEffect(() => {
@@ -742,10 +849,10 @@ export function HomeScreen({ userName }: HomeScreenProps) {
     const openMenu = () => {
         setIsMenuOpen(true);
         menuProgress.setValue(0);
-        Animated.timing(menuProgress, {
+        Animated.spring(menuProgress, {
             toValue: 1,
-            duration: 260,
-            easing: Easing.out(Easing.quad),
+            tension: 65,
+            friction: 11,
             useNativeDriver: true,
         }).start();
     };
@@ -753,8 +860,8 @@ export function HomeScreen({ userName }: HomeScreenProps) {
     const closeMenu = () => {
         Animated.timing(menuProgress, {
             toValue: 0,
-            duration: 220,
-            easing: Easing.out(Easing.quad),
+            duration: 280,
+            easing: Easing.bezier(0.4, 0.0, 0.2, 1),
             useNativeDriver: true,
         }).start(() => {
             setIsMenuOpen(false);
@@ -1221,9 +1328,25 @@ export function HomeScreen({ userName }: HomeScreenProps) {
                 ]}
             >
                 {/* Top Bar */}
-                <Animated.View>
-                    <BlurView intensity={16} tint="light" style={styles.topBar}>
-                        <View style={styles.topBarLeft}>
+                <Animated.View
+                    style={[
+                        styles.topBarContainer,
+                        {
+                            transform: [{ translateY: topBarTranslateY }],
+                        },
+                    ]}
+                >
+                    <View style={styles.topBar}>
+                        <BlurView intensity={isDarkTheme ? 30 : 35} tint={isDarkTheme ? "dark" : "light"} style={StyleSheet.absoluteFill} />
+                        <LinearGradient
+                            colors={isDarkTheme 
+                                ? ['rgba(26, 26, 26, 0.85)', 'rgba(31, 31, 31, 0.9)']
+                                : ['rgba(255, 255, 255, 0.8)', 'rgba(247, 250, 255, 0.75)']}
+                            start={{ x: 0, y: 0 }}
+                            end={{ x: 0, y: 1 }}
+                            style={StyleSheet.absoluteFill}
+                        />
+                        <View style={styles.topBarContent}>
                             <TouchableOpacity
                                 onPress={() => {
                                     if (isMenuOpen) {
@@ -1238,27 +1361,27 @@ export function HomeScreen({ userName }: HomeScreenProps) {
                                 <MaterialCommunityIcons
                                     name="menu"
                                     size={22}
-                                    color={COLORS.black}
+                                    color={isDarkTheme ? '#FFFFFF' : COLORS.black}
                                 />
                             </TouchableOpacity>
-                        </View>
-                        <View style={styles.topBarCenter}>
-                            <Text style={styles.logoText}>𝚂𝚌𝚊𝚗𝚗𝚎𝚛</Text>
-                        </View>
-                        <View style={styles.topBarRight}>
+                            
+                            <View style={styles.topBarCenter}>
+                                <Text style={styles.topBarTitle}>Scanner</Text>
+                            </View>
+                            
                             <TouchableOpacity
                                 onPress={openNotification}
-                                style={styles.notificationIcon}
+                                style={styles.topBarIconButton}
                                 activeOpacity={0.8}
                             >
                                 <MaterialCommunityIcons
                                     name="bell-outline"
-                                    size={20}
-                                    color={COLORS.softGreyText}
+                                    size={22}
+                                    color={isDarkTheme ? '#FFFFFF' : '#1A73E8'}
                                 />
                             </TouchableOpacity>
                         </View>
-                    </BlurView>
+                    </View>
                 </Animated.View>
 
                 {/* Notification Overlay */}
@@ -1640,93 +1763,137 @@ export function HomeScreen({ userName }: HomeScreenProps) {
                             },
                         ]}
                     >
+                        <BlurView intensity={20} tint={isDarkTheme ? "dark" : "light"} style={StyleSheet.absoluteFill} />
                         <TouchableOpacity
                             style={styles.menuBackdrop}
                             activeOpacity={1}
                             onPress={closeMenu}
                         />
-                        <BlurView intensity={30} tint={isDarkTheme ? "dark" : "light"} style={styles.menuContainer}>
-                            <View style={styles.menuHeaderRow}>
-                                <View style={styles.menuHeaderLeft}>
-                                    <View style={styles.menuLogoWrapper}>
-                                        <Image
-                                            source={require('../../../assets/icon.png')}
-                                            style={styles.menuLogo}
-                                            resizeMode="contain"
-                                        />
-                                    </View>
-                                    <Text style={styles.menuTitle}>{t.scannerMenu}</Text>
-                                </View>
-                                <TouchableOpacity
-                                    onPress={closeMenu}
-                                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                                >
-                                    <MaterialCommunityIcons
-                                        name="close"
-                                        size={22}
-                                        color={COLORS.softGreyText}
-                                    />
-                                </TouchableOpacity>
-                            </View>
-                            <ScrollView showsVerticalScrollIndicator={false}>
-                                <Text style={styles.menuSectionTitle}>{t.navigation}</Text>
-                                {[
-                                    { label: t.home, icon: 'home-outline' },
-                                    { label: t.dashboard, icon: 'view-dashboard-outline' },
-                                    { label: t.scanProductMenu, icon: 'barcode-scan' },
-                                    { label: t.scanHistory, icon: 'history' },
-                                    { label: t.favorites, icon: 'star-outline' },
-                                    { label: t.reports, icon: 'file-chart-outline' },
-                                    { label: t.notifications, icon: 'bell-outline' },
-                                ].map((item) => (
-                                    <TouchableOpacity key={item.label} style={styles.menuItem}>
-                                        <View style={styles.menuItemRow}>
+                        <View style={styles.menuContainer}>
+                            <BlurView intensity={25} tint={isDarkTheme ? "dark" : "light"} style={StyleSheet.absoluteFill} />
+                            <LinearGradient
+                                colors={isDarkTheme ? ['#1A1A1A', '#1F1F1F'] : ['#FFFFFF', '#F7FAFF']}
+                                start={{ x: 0, y: 0 }}
+                                end={{ x: 0, y: 1 }}
+                                style={StyleSheet.absoluteFill}
+                            />
+                            <View style={styles.menuContent}>
+                                <View style={styles.menuHeaderRow}>
+                                    <View style={styles.menuHeaderLeft}>
+                                        <View style={styles.menuAIIconWrapper}>
                                             <MaterialCommunityIcons
-                                                name={item.icon as any}
-                                                size={18}
+                                                name="robot-outline"
+                                                size={24}
                                                 color={COLORS.primaryBlue}
                                             />
-                                            <Text style={styles.menuItemText}>{item.label}</Text>
                                         </View>
-                                    </TouchableOpacity>
-                                ))}
+                                        <Text style={styles.menuTitle}>{t.scannerMenu}</Text>
+                                    </View>
+                                    <Pressable
+                                        onPress={closeMenu}
+                                        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                                        style={({ pressed }) => [
+                                            styles.menuCloseButton,
+                                            pressed && styles.menuCloseButtonPressed,
+                                        ]}
+                                    >
+                                        <MaterialCommunityIcons
+                                            name="close"
+                                            size={20}
+                                            color={COLORS.textSecondary}
+                                        />
+                                    </Pressable>
+                                </View>
+                                <ScrollView 
+                                    showsVerticalScrollIndicator={false}
+                                    contentContainerStyle={styles.menuScrollContent}
+                                >
+                                    <Text style={styles.menuSectionTitle}>{t.navigation}</Text>
+                                    {[
+                                        { label: t.home, icon: 'home-outline' },
+                                        { label: t.dashboard, icon: 'view-dashboard-outline' },
+                                        { label: t.scanProductMenu, icon: 'barcode-scan' },
+                                        { label: t.scanHistory, icon: 'history' },
+                                        { label: t.favorites, icon: 'star-outline' },
+                                        { label: t.reports, icon: 'file-chart-outline' },
+                                        { label: t.notifications, icon: 'bell-outline' },
+                                    ].map((item) => (
+                                        <Pressable 
+                                            key={item.label} 
+                                            style={({ pressed }) => [
+                                                styles.menuItem,
+                                                pressed && styles.menuItemPressed,
+                                            ]}
+                                        >
+                                            <View style={styles.menuItemContent}>
+                                                <View style={styles.menuItemIconWrapper}>
+                                                    <MaterialCommunityIcons
+                                                        name={item.icon as any}
+                                                        size={20}
+                                                        color={COLORS.primaryBlue}
+                                                    />
+                                                </View>
+                                                <Text style={styles.menuItemText}>{item.label}</Text>
+                                            </View>
+                                        </Pressable>
+                                    ))}
+                                    <View style={styles.menuDivider} />
 
-                                <TouchableOpacity
-                                    style={styles.menuSectionHeaderRow}
+                                <Pressable
+                                    style={({ pressed }) => [
+                                        styles.menuSectionHeaderRow,
+                                        pressed && styles.menuSectionHeaderPressed,
+                                    ]}
                                     onPress={() => setIsAccountOpen((prev) => !prev)}
-                                    activeOpacity={0.8}
                                 >
                                     <Text style={styles.menuSectionTitle}>{t.account}</Text>
                                     <MaterialCommunityIcons
                                         name={isAccountOpen ? 'chevron-up' : 'chevron-down'}
-                                        size={20}
-                                        color={COLORS.softGreyText}
+                                        size={16}
+                                        color={COLORS.textSecondary}
                                     />
-                                </TouchableOpacity>
+                                </Pressable>
                                 {isAccountOpen && (
                                     <>
-                                        <TouchableOpacity style={styles.menuItem}>
-                                            <View style={styles.menuItemRow}>
-                                                <MaterialCommunityIcons
-                                                    name="account-outline"
-                                                    size={18}
-                                                    color={COLORS.primaryBlue}
-                                                />
+                                        <Pressable 
+                                            style={({ pressed }) => [
+                                                styles.menuItem,
+                                                pressed && styles.menuItemPressed,
+                                            ]}
+                                        >
+                                            <View style={styles.menuItemContent}>
+                                                <View style={styles.menuItemIconWrapper}>
+                                                    <MaterialCommunityIcons
+                                                        name="account-outline"
+                                                        size={20}
+                                                        color={COLORS.primaryBlue}
+                                                    />
+                                                </View>
                                                 <Text style={styles.menuItemText}>Profile</Text>
                                             </View>
-                                        </TouchableOpacity>
-                                        <TouchableOpacity style={styles.menuItem}>
-                                            <View style={styles.menuItemRow}>
-                                                <MaterialCommunityIcons
-                                                    name="login"
-                                                    size={18}
-                                                    color={COLORS.primaryBlue}
-                                                />
+                                        </Pressable>
+                                        <Pressable 
+                                            style={({ pressed }) => [
+                                                styles.menuItem,
+                                                pressed && styles.menuItemPressed,
+                                            ]}
+                                        >
+                                            <View style={styles.menuItemContent}>
+                                                <View style={styles.menuItemIconWrapper}>
+                                                    <MaterialCommunityIcons
+                                                        name="login"
+                                                        size={20}
+                                                        color={COLORS.primaryBlue}
+                                                    />
+                                                </View>
                                                 <Text style={styles.menuItemText}>{isArabic ? 'تسجيل الدخول' : 'Login'}</Text>
                                             </View>
-                                        </TouchableOpacity>
-                                        <TouchableOpacity
-                                            style={styles.menuItem}
+                                        </Pressable>
+                                        <Pressable
+                                            style={({ pressed }) => [
+                                                styles.menuItem,
+                                                pressed && styles.menuItemPressed,
+                                            ]}
                                             onPress={() =>
                                                 Alert.alert('Log out', 'Are you sure you want to log out?', [
                                                     { text: 'Cancel', style: 'cancel' },
@@ -1734,32 +1901,36 @@ export function HomeScreen({ userName }: HomeScreenProps) {
                                                 ])
                                             }
                                         >
-                                            <View style={styles.menuItemRow}>
-                                                <MaterialCommunityIcons
-                                                    name="logout"
-                                                    size={18}
-                                                    color="#EF4444"
-                                                />
+                                            <View style={styles.menuItemContent}>
+                                                <View style={styles.menuItemIconWrapper}>
+                                                    <MaterialCommunityIcons
+                                                        name="logout"
+                                                        size={20}
+                                                        color="#EF4444"
+                                                    />
+                                                </View>
                                                 <Text style={[styles.menuItemText, styles.menuItemDanger]}>
                                                     Logout
                                                 </Text>
                                             </View>
-                                        </TouchableOpacity>
+                                        </Pressable>
                                     </>
                                 )}
 
-                                <TouchableOpacity
-                                    style={styles.menuSectionHeaderRow}
+                                <Pressable
+                                    style={({ pressed }) => [
+                                        styles.menuSectionHeaderRow,
+                                        pressed && styles.menuSectionHeaderPressed,
+                                    ]}
                                     onPress={() => setIsSettingsOpen((prev) => !prev)}
-                                    activeOpacity={0.8}
                                 >
                                     <Text style={styles.menuSectionTitle}>{t.settings}</Text>
                                     <MaterialCommunityIcons
                                         name={isSettingsOpen ? 'chevron-up' : 'chevron-down'}
-                                        size={20}
-                                        color={COLORS.softGreyText}
+                                        size={16}
+                                        color={COLORS.textSecondary}
                                     />
-                                </TouchableOpacity>
+                                </Pressable>
                                 {isSettingsOpen && (
                                     <>
                                         {/* Theme Toggle */}
@@ -1814,28 +1985,48 @@ export function HomeScreen({ userName }: HomeScreenProps) {
                                             />
                                         </View>
 
-                                        <TouchableOpacity style={styles.menuItem}>
-                                            <View style={styles.menuItemRow}>
-                                                <MaterialCommunityIcons
-                                                    name="tune-variant"
-                                                    size={18}
-                                                    color={COLORS.primaryBlue}
-                                                />
+                                        <Pressable 
+                                            style={({ pressed }) => [
+                                                styles.menuItem,
+                                                pressed && styles.menuItemPressed,
+                                            ]}
+                                        >
+                                            <View style={styles.menuItemContent}>
+                                                <View style={styles.menuItemIconWrapper}>
+                                                    <MaterialCommunityIcons
+                                                        name="tune-variant"
+                                                        size={20}
+                                                        color={COLORS.primaryBlue}
+                                                    />
+                                                </View>
                                                 <Text style={styles.menuItemText}>{isArabic ? 'عام' : 'General'}</Text>
                                             </View>
-                                        </TouchableOpacity>
-                                        <TouchableOpacity style={styles.menuSubItem}>
+                                        </Pressable>
+                                        <Pressable 
+                                            style={({ pressed }) => [
+                                                styles.menuSubItem,
+                                                pressed && styles.menuSubItemPressed,
+                                            ]}
+                                        >
                                             <Text style={styles.menuSubItemText}>
                                                 {t.changePassword}
                                             </Text>
-                                        </TouchableOpacity>
-                                        <TouchableOpacity style={styles.menuSubItem}>
+                                        </Pressable>
+                                        <Pressable 
+                                            style={({ pressed }) => [
+                                                styles.menuSubItem,
+                                                pressed && styles.menuSubItemPressed,
+                                            ]}
+                                        >
                                             <Text style={styles.menuSubItemText}>
                                                 {t.twoFactorAuth}
                                             </Text>
-                                        </TouchableOpacity>
-                                        <TouchableOpacity
-                                            style={styles.menuSubItem}
+                                        </Pressable>
+                                        <Pressable
+                                            style={({ pressed }) => [
+                                                styles.menuSubItem,
+                                                pressed && styles.menuSubItemPressed,
+                                            ]}
                                             onPress={() =>
                                                 Alert.alert(
                                                     t.deleteAccount,
@@ -1852,47 +2043,72 @@ export function HomeScreen({ userName }: HomeScreenProps) {
                                             <Text style={[styles.menuSubItemText, styles.menuItemDanger]}>
                                                 {t.deleteAccount}
                                             </Text>
-                                        </TouchableOpacity>
+                                        </Pressable>
                                     </>
                                 )}
 
-                                <TouchableOpacity
-                                    style={styles.menuSectionHeaderRow}
+                                <Pressable
+                                    style={({ pressed }) => [
+                                        styles.menuSectionHeaderRow,
+                                        pressed && styles.menuSectionHeaderPressed,
+                                    ]}
                                     onPress={() => setIsSubscriptionsOpen((prev) => !prev)}
-                                    activeOpacity={0.8}
                                 >
                                     <Text style={styles.menuSectionTitle}>{t.subscriptions}</Text>
                                     <MaterialCommunityIcons
                                         name={isSubscriptionsOpen ? 'chevron-up' : 'chevron-down'}
-                                        size={20}
-                                        color={COLORS.softGreyText}
+                                        size={16}
+                                        color={COLORS.textSecondary}
                                     />
-                                </TouchableOpacity>
+                                </Pressable>
                                 {isSubscriptionsOpen && (
                                     <>
-                                        <TouchableOpacity style={styles.menuItem}>
-                                            <View style={styles.menuItemRow}>
-                                                <MaterialCommunityIcons
-                                                    name="crown-outline"
-                                                    size={18}
-                                                    color={COLORS.primaryBlue}
-                                                />
+                                        <Pressable 
+                                            style={({ pressed }) => [
+                                                styles.menuItem,
+                                                pressed && styles.menuItemPressed,
+                                            ]}
+                                        >
+                                            <View style={styles.menuItemContent}>
+                                                <View style={styles.menuItemIconWrapper}>
+                                                    <MaterialCommunityIcons
+                                                        name="crown-outline"
+                                                        size={20}
+                                                        color={COLORS.primaryBlue}
+                                                    />
+                                                </View>
                                                 <Text style={styles.menuItemText}>Current plan: Pro</Text>
                                             </View>
-                                        </TouchableOpacity>
-                                        <TouchableOpacity style={styles.menuSubItem}>
+                                        </Pressable>
+                                        <Pressable 
+                                            style={({ pressed }) => [
+                                                styles.menuSubItem,
+                                                pressed && styles.menuSubItemPressed,
+                                            ]}
+                                        >
                                             <Text style={styles.menuSubItemText}>Upgrade to Pro Max</Text>
-                                        </TouchableOpacity>
-                                        <TouchableOpacity style={styles.menuSubItem}>
+                                        </Pressable>
+                                        <Pressable 
+                                            style={({ pressed }) => [
+                                                styles.menuSubItem,
+                                                pressed && styles.menuSubItemPressed,
+                                            ]}
+                                        >
                                             <Text style={styles.menuSubItemText}>Manage billing</Text>
-                                        </TouchableOpacity>
-                                        <TouchableOpacity style={styles.menuSubItem}>
+                                        </Pressable>
+                                        <Pressable 
+                                            style={({ pressed }) => [
+                                                styles.menuSubItem,
+                                                pressed && styles.menuSubItemPressed,
+                                            ]}
+                                        >
                                             <Text style={styles.menuSubItemText}>Invoices</Text>
-                                        </TouchableOpacity>
+                                        </Pressable>
                                     </>
                                 )}
                             </ScrollView>
-                        </BlurView>
+                            </View>
+                        </View>
                     </Animated.View>
                 )}
 
@@ -1913,6 +2129,7 @@ export function HomeScreen({ userName }: HomeScreenProps) {
                             contentContainerStyle={styles.scrollContent}
                             showsVerticalScrollIndicator={false}
                             scrollEventThrottle={16}
+                            onScroll={handleScroll}
                         >
                             {!isProfile && !isScan && (
                                 <>
@@ -2116,6 +2333,7 @@ export function HomeScreen({ userName }: HomeScreenProps) {
                             contentContainerStyle={styles.scrollContent}
                             showsVerticalScrollIndicator={false}
                             scrollEventThrottle={16}
+                            onScroll={handleScroll}
                         >
                             <View style={styles.scanContainer}>
                             <View style={styles.scanHeader}>
@@ -2241,6 +2459,7 @@ export function HomeScreen({ userName }: HomeScreenProps) {
                             contentContainerStyle={styles.scrollContent}
                             showsVerticalScrollIndicator={false}
                             scrollEventThrottle={16}
+                            onScroll={handleScroll}
                         >
                             <View style={styles.aboutContainer}>
                                 {/* Hero Section */}
@@ -2457,6 +2676,7 @@ export function HomeScreen({ userName }: HomeScreenProps) {
                             contentContainerStyle={styles.scrollContent}
                             showsVerticalScrollIndicator={false}
                             scrollEventThrottle={16}
+                            onScroll={handleScroll}
                         >
                             <View style={styles.profileContainer}>
                             <View style={styles.profileHeader}>
@@ -2574,87 +2794,120 @@ export function HomeScreen({ userName }: HomeScreenProps) {
                     </Animated.View>
                 </View>
 
-                {/* Bottom Navigation */}
+                {/* Bottom Navigation - Modern AI Style */}
                 <View style={styles.bottomNavContainer}>
-                    <View style={[styles.bottomNav, { paddingBottom: Platform.OS === 'ios' ? Math.max(8, Math.min(insets.bottom, 8)) : 12 + insets.bottom }]}>
-                        {(
-                            [
-                                { key: 'home', icon: 'home-variant', inactiveIcon: 'home-variant-outline', label: t.home },
-                                { key: 'scan', icon: 'barcode-scan', inactiveIcon: 'barcode-scan', label: t.scan },
-                                { key: 'about', icon: 'information', inactiveIcon: 'information-outline', label: t.about },
-                                { key: 'profile', icon: 'account-circle', inactiveIcon: 'account-circle-outline', label: t.profile },
-                            ] as const
-                        ).map((item) => {
-                            const isActive = activeNav === item.key;
-                            const color = isActive ? COLORS.primaryBlue : COLORS.textSecondary;
+                    <View style={[
+                        styles.bottomNav,
+                        { paddingBottom: Platform.OS === 'ios' ? Math.max(insets.bottom - 8, 8) : insets.bottom + 8 }
+                    ]}>
+                        <BlurView intensity={isDarkTheme ? 30 : 35} tint={isDarkTheme ? "dark" : "light"} style={StyleSheet.absoluteFill} />
+                        <LinearGradient
+                            colors={isDarkTheme 
+                                ? ['rgba(26, 26, 26, 0.85)', 'rgba(31, 31, 31, 0.9)']
+                                : ['rgba(255, 255, 255, 0.8)', 'rgba(247, 250, 255, 0.75)']}
+                            start={{ x: 0, y: 0 }}
+                            end={{ x: 0, y: 1 }}
+                            style={StyleSheet.absoluteFill}
+                        />
+                        <View 
+                            style={styles.bottomNavContent}
+                            onLayout={(e) => {
+                                const { width } = e.nativeEvent.layout;
+                                // Recalculate position when layout changes
+                                const tabOrder: Array<'home' | 'scan' | 'about' | 'profile'> = ['home', 'scan', 'about', 'profile'];
+                                const activeIndex = tabOrder.indexOf(activeNav);
+                                // Each item takes equal space (flex: 1), so center is at (index + 0.5) * itemWidth
+                                const itemWidth = width / 4;
+                                // Center the underline (40px wide) and glow (48px wide) at the center of each tab
+                                // Both should be centered, so we use the same calculation
+                                const newPosition = (activeIndex * itemWidth) + (itemWidth / 2) - 20; // -20 centers the 40px underline
+                                underlineTranslateX.setValue(newPosition);
+                            }}
+                        >
+                            {/* Single moving underline */}
+                            <Animated.View
+                                style={[
+                                    styles.bottomNavUnderline,
+                                    {
+                                        transform: [{ translateX: underlineTranslateX }],
+                                    },
+                                ]}
+                            />
                             
-                            // Get animated values for this item
-                            let labelOpacity: Animated.Value;
-                            let labelTranslateY: Animated.Value;
-                            
-                            switch (item.key) {
-                                case 'home':
-                                    labelOpacity = homeLabelOpacity;
-                                    labelTranslateY = homeLabelTranslateY;
-                                    break;
-                                case 'scan':
-                                    labelOpacity = scanLabelOpacity;
-                                    labelTranslateY = scanLabelTranslateY;
-                                    break;
-                                case 'about':
-                                    labelOpacity = aboutLabelOpacity;
-                                    labelTranslateY = aboutLabelTranslateY;
-                                    break;
-                                case 'profile':
-                                    labelOpacity = profileLabelOpacity;
-                                    labelTranslateY = profileLabelTranslateY;
-                                    break;
-                            }
-                            
-                            return (
-                                <Pressable
-                                    key={item.key}
-                                    onPress={() => setActiveNav(item.key)}
-                                    style={styles.bottomNavItem}
-                                >
-                                    {({ pressed }) => {
-                                        const baseScale = isActive ? 1.05 : 1;
-                                        const scale = pressed ? baseScale * 0.95 : baseScale;
-                                        return (
-                                            <View style={styles.bottomNavItemContent}>
-                                                <Animated.View
-                                                    style={[
-                                                        styles.bottomNavIconWrapper,
-                                                        {
-                                                            transform: [{ scale }],
-                                                        },
-                                                    ]}
-                                                >
-                                                    <MaterialCommunityIcons
-                                                        name={isActive ? item.icon : item.inactiveIcon}
-                                                        size={26}
-                                                        color={color}
-                                                    />
-                                                </Animated.View>
-                                                <Animated.View
-                                                    style={[
-                                                        styles.bottomNavLabelWrapper,
-                                                        {
-                                                            opacity: labelOpacity,
-                                                            transform: [{ translateY: labelTranslateY }],
-                                                        },
-                                                    ]}
-                                                >
-                                                    <Text style={[styles.bottomNavLabel, { color }]}>
+                            {(
+                                [
+                                    { key: 'home', icon: 'home-variant', inactiveIcon: 'home-variant-outline', label: t.home, index: 0 },
+                                    { key: 'scan', icon: 'barcode-scan', inactiveIcon: 'barcode-scan', label: t.scan, index: 1 },
+                                    { key: 'about', icon: 'information', inactiveIcon: 'information-outline', label: t.about, index: 2 },
+                                    { key: 'profile', icon: 'account-circle', inactiveIcon: 'account-circle-outline', label: t.profile, index: 3 },
+                                ] as const
+                            ).map((item) => {
+                                const isActive = activeNav === item.key;
+                                
+                                // Get animated values for this item
+                                let iconScale: Animated.Value;
+                                
+                                switch (item.key) {
+                                    case 'home':
+                                        iconScale = homeIconScale;
+                                        break;
+                                    case 'scan':
+                                        iconScale = scanIconScale;
+                                        break;
+                                    case 'about':
+                                        iconScale = aboutIconScale;
+                                        break;
+                                    case 'profile':
+                                        iconScale = profileIconScale;
+                                        break;
+                                }
+                                
+                                return (
+                                    <Pressable
+                                        key={item.key}
+                                        onPress={() => setActiveNav(item.key)}
+                                        style={styles.bottomNavItem}
+                                    >
+                                        {({ pressed }) => {
+                                            return (
+                                                <View style={styles.bottomNavItemContent}>
+                                                    <Animated.View
+                                                        style={[
+                                                            styles.bottomNavIconContainer,
+                                                            {
+                                                                transform: [{ scale: iconScale }],
+                                                                opacity: pressed ? 0.7 : 1,
+                                                            },
+                                                        ]}
+                                                    >
+                                                        <MaterialCommunityIcons
+                                                            name={isActive ? item.icon : item.inactiveIcon}
+                                                            size={isActive ? 28 : 24}
+                                                            color={isActive 
+                                                                ? (isDarkTheme ? '#7C9AFF' : '#1A73E8')
+                                                                : (isDarkTheme ? 'rgba(255, 255, 255, 0.5)' : 'rgba(0, 0, 0, 0.45)')
+                                                            }
+                                                        />
+                                                    </Animated.View>
+                                                    
+                                                    {/* Label always visible */}
+                                                    <Text style={[
+                                                        styles.bottomNavLabel,
+                                                        { 
+                                                            color: isActive 
+                                                                ? (isDarkTheme ? '#7C9AFF' : '#1A73E8')
+                                                                : (isDarkTheme ? 'rgba(255, 255, 255, 0.6)' : 'rgba(0, 0, 0, 0.5)')
+                                                        }
+                                                    ]}>
                                                         {item.label}
                                                     </Text>
-                                                </Animated.View>
-                                            </View>
-                                        );
-                                    }}
-                                </Pressable>
-                            );
-                        })}
+                                                </View>
+                                            );
+                                        }}
+                                    </Pressable>
+                                );
+                            })}
+                        </View>
                     </View>
                 </View>
             </Animated.View>
@@ -2663,7 +2916,7 @@ export function HomeScreen({ userName }: HomeScreenProps) {
 }
 
 // Dynamic styles function that takes theme colors
-const createStyles = (COLORS: { primaryBlue: string; deepBlue: string; background: string; backgroundSecondary: string; backgroundWhite: string; lightGreyBg: string; softGreyText: string; text: string; textSecondary: string; black: string; shadow: string; border: string }) => StyleSheet.create({
+const createStyles = (COLORS: { primaryBlue: string; deepBlue: string; background: string; backgroundSecondary: string; backgroundWhite: string; lightGreyBg: string; softGreyText: string; text: string; textSecondary: string; black: string; shadow: string; border: string }, isDarkTheme: boolean) => StyleSheet.create({
     safeArea: {
         flex: 1,
         backgroundColor: COLORS.backgroundWhite,
@@ -2672,32 +2925,46 @@ const createStyles = (COLORS: { primaryBlue: string; deepBlue: string; backgroun
         flex: 1,
         backgroundColor: COLORS.backgroundWhite,
     },
+    topBarContainer: {
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        right: 0,
+        zIndex: 10,
+    },
     topBar: {
+        height: 68,
+        marginHorizontal: 16,
+        marginTop: Platform.OS === 'ios' ? 8 : 12,
+        marginBottom: 8,
+        borderRadius: 20,
+        overflow: 'hidden',
+        shadowColor: isDarkTheme ? '#000000' : '#1A73E8',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: isDarkTheme ? 0.4 : 0.15,
+        shadowRadius: 24,
+        elevation: 20,
+        borderWidth: isDarkTheme ? 0 : 1,
+        borderColor: isDarkTheme ? 'transparent' : 'rgba(255, 255, 255, 0.3)',
+    },
+    topBarContent: {
+        flex: 1,
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
-        backgroundColor: COLORS.backgroundWhite,
-        paddingHorizontal: 16,
-        paddingTop: Platform.OS === 'android' ? 28 : 12,
+        paddingHorizontal: 20,
+        paddingTop: Platform.OS === 'ios' ? 8 : 12,
         paddingBottom: 12,
-        shadowColor: COLORS.black,
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.08,
-        shadowRadius: 6,
-        elevation: 4,
-        borderBottomWidth: 1,
-        borderBottomColor: 'rgba(0,0,0,0.05)',
-    },
-    topBarLeft: {
-        width: 48,
-        justifyContent: 'flex-start',
-        alignItems: 'flex-start',
     },
     menuButton: {
         width: 32,
         height: 32,
-        borderRadius: 16,
-        backgroundColor: 'rgba(15,23,42,0.03)',
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    topBarIconButton: {
+        width: 44,
+        height: 44,
         justifyContent: 'center',
         alignItems: 'center',
     },
@@ -2705,17 +2972,15 @@ const createStyles = (COLORS: { primaryBlue: string; deepBlue: string; backgroun
         flex: 1,
         alignItems: 'center',
         justifyContent: 'center',
+        paddingHorizontal: 20,
     },
-    logoText: {
-        fontSize: 20,
-        fontWeight: '700',
-        letterSpacing: 0.8,
-        color: COLORS.black,
+    topBarTitle: {
+        fontSize: 22,
+        fontWeight: '600',
+        fontFamily: Platform.OS === 'ios' ? 'SF Pro Display' : 'Roboto',
+        letterSpacing: -0.3,
+        color: isDarkTheme ? '#7C9AFF' : '#1A73E8',
         textAlign: 'center',
-    },
-    topBarRight: {
-        flexDirection: 'row',
-        alignItems: 'center',
     },
     notificationIcon: {
         width: 32,
@@ -2747,7 +3012,7 @@ const createStyles = (COLORS: { primaryBlue: string; deepBlue: string; backgroun
     },
     scrollContent: {
         paddingHorizontal: 16,
-        paddingTop: 16,
+        paddingTop: Platform.OS === 'ios' ? 100 : 96, // Account for top bar (68px + margins)
         paddingBottom: 72,
         backgroundColor: COLORS.backgroundWhite,
     },
@@ -3536,80 +3801,118 @@ const createStyles = (COLORS: { primaryBlue: string; deepBlue: string; backgroun
     },
     menuBackdrop: {
         flex: 1,
-        backgroundColor: 'rgba(0,0,0,0.15)',
+        backgroundColor: isDarkTheme ? 'rgba(0,0,0,0.6)' : 'rgba(0,0,0,0.4)',
     },
     menuContainer: {
         position: 'absolute',
         top: 0,
         bottom: 0,
         left: 0,
-        width: '75%',
-        borderTopRightRadius: 18,
-        borderBottomRightRadius: 18,
-        paddingTop: 72,
-        paddingHorizontal: 20,
-        paddingBottom: 20,
-        backgroundColor: COLORS.backgroundSecondary,
-        borderWidth: 1,
-        borderColor: COLORS.border,
+        width: '80%',
+        borderTopRightRadius: 24,
+        borderBottomRightRadius: 24,
+        overflow: 'hidden',
+        backgroundColor: isDarkTheme ? 'rgba(26, 26, 26, 0.85)' : 'rgba(255, 255, 255, 0.75)',
         shadowColor: COLORS.black,
-        shadowOffset: { width: 0, height: 8 },
-        shadowOpacity: 0.15,
-        shadowRadius: 18,
-        elevation: 10,
+        shadowOffset: { width: -4, height: 0 },
+        shadowOpacity: isDarkTheme ? 0.3 : 0.12,
+        shadowRadius: 24,
+        elevation: 24,
+    },
+    menuContent: {
+        flex: 1,
+        paddingTop: Platform.OS === 'ios' ? 60 : 48,
+        paddingHorizontal: 24,
+        paddingBottom: 24,
+    },
+    menuScrollContent: {
+        paddingBottom: 20,
+    },
+    menuAIIconWrapper: {
+        width: 40,
+        height: 40,
+        borderRadius: 12,
+        backgroundColor: isDarkTheme ? 'rgba(74, 158, 255, 0.15)' : 'rgba(26, 115, 232, 0.1)',
+        justifyContent: 'center',
+        alignItems: 'center',
+        marginRight: 12,
+    },
+    menuCloseButton: {
+        width: 32,
+        height: 32,
+        borderRadius: 16,
+        justifyContent: 'center',
+        alignItems: 'center',
+        backgroundColor: isDarkTheme ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.04)',
+    },
+    menuCloseButtonPressed: {
+        backgroundColor: isDarkTheme ? 'rgba(255, 255, 255, 0.15)' : 'rgba(0, 0, 0, 0.08)',
+        transform: [{ scale: 0.95 }],
     },
     menuSectionTitle: {
-        fontSize: 13,
+        fontSize: 11,
         fontWeight: '600',
-        color: COLORS.softGreyText,
+        color: isDarkTheme ? 'rgba(255, 255, 255, 0.45)' : 'rgba(0, 0, 0, 0.45)',
         textTransform: 'uppercase',
         letterSpacing: 0.8,
-        marginTop: 4,
-        marginBottom: 6,
+        marginTop: 20,
+        marginBottom: 12,
     },
     menuHeaderRow: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
-        marginBottom: 10,
+        marginBottom: 28,
     },
     menuTitle: {
-        fontSize: 20,
+        fontSize: 26,
         fontWeight: '700',
         color: COLORS.text,
+        letterSpacing: -0.5,
     },
     menuHeaderLeft: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 10,
-    },
-    menuLogoWrapper: {
-        width: 28,
-        height: 28,
-        borderRadius: 10,
-        backgroundColor: COLORS.backgroundSecondary,
-        justifyContent: 'center',
-        alignItems: 'center',
-    },
-    menuLogo: {
-        width: 22,
-        height: 22,
-        borderRadius: 6,
     },
     menuItem: {
-        paddingVertical: 10,
+        paddingVertical: 0,
+        marginBottom: 2,
+        borderRadius: 12,
+        overflow: 'hidden',
+    },
+    menuItemPressed: {
+        backgroundColor: isDarkTheme ? 'rgba(74, 158, 255, 0.12)' : 'rgba(26, 115, 232, 0.08)',
+        transform: [{ scale: 0.98 }],
+    },
+    menuItemContent: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingVertical: 14,
+        paddingHorizontal: 12,
+    },
+    menuItemIconWrapper: {
+        width: 36,
+        height: 36,
+        borderRadius: 10,
+        backgroundColor: isDarkTheme ? 'rgba(74, 158, 255, 0.12)' : 'rgba(26, 115, 232, 0.08)',
+        justifyContent: 'center',
+        alignItems: 'center',
+        marginRight: 14,
     },
     menuItemText: {
-        fontSize: 15,
+        fontSize: 16,
+        fontWeight: '500',
         color: COLORS.text,
+        letterSpacing: -0.2,
     },
     menuItemDanger: {
         color: '#EF4444',
     },
-    menuItemRow: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 10,
+    menuDivider: {
+        height: 1,
+        backgroundColor: isDarkTheme ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.06)',
+        marginVertical: 16,
+        marginHorizontal: -12,
     },
     menuToggleItem: {
         flexDirection: 'row',
@@ -3639,64 +3942,107 @@ const createStyles = (COLORS: { primaryBlue: string; deepBlue: string; backgroun
         color: COLORS.softGreyText,
     },
     menuSubItem: {
-        paddingVertical: 6,
-        paddingLeft: 12,
+        paddingVertical: 10,
+        marginBottom: 2,
+        borderRadius: 8,
+        overflow: 'hidden',
+        marginLeft: 50,
+        paddingHorizontal: 12,
+    },
+    menuSubItemPressed: {
+        backgroundColor: isDarkTheme ? 'rgba(255, 255, 255, 0.06)' : 'rgba(0, 0, 0, 0.04)',
     },
     menuSubItemText: {
         fontSize: 14,
-        color: COLORS.softGreyText,
+        color: isDarkTheme ? 'rgba(255, 255, 255, 0.7)' : 'rgba(0, 0, 0, 0.65)',
+        fontWeight: '400',
     },
     menuSectionHeaderRow: {
         marginTop: 14,
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
+        paddingVertical: 8,
+        paddingHorizontal: 4,
+        borderRadius: 8,
+    },
+    menuSectionHeaderPressed: {
+        backgroundColor: isDarkTheme ? 'rgba(255, 255, 255, 0.05)' : 'rgba(0, 0, 0, 0.03)',
     },
     bottomNavContainer: {
         position: 'absolute',
         left: 0,
         right: 0,
         bottom: 0,
-        backgroundColor: COLORS.backgroundWhite,
+        alignItems: 'center',
+        justifyContent: 'flex-end',
+        pointerEvents: 'box-none',
     },
     bottomNav: {
-        paddingHorizontal: 24,
-        paddingTop: 12,
-        backgroundColor: COLORS.backgroundWhite,
-        borderTopLeftRadius: 20,
-        borderTopRightRadius: 20,
-        shadowColor: COLORS.black,
-        shadowOffset: { width: 0, height: -4 },
-        shadowOpacity: 0.09,
-        shadowRadius: 12,
-        elevation: 8,
+        width: '92%',
+        maxWidth: 400,
+        height: 80,
+        marginBottom: 16,
+        borderRadius: 28,
+        overflow: 'hidden',
+        shadowColor: isDarkTheme ? '#000000' : '#1A73E8',
+        shadowOffset: { width: 0, height: 8 },
+        shadowOpacity: isDarkTheme ? 0.4 : 0.15,
+        shadowRadius: 24,
+        elevation: 20,
+        borderWidth: isDarkTheme ? 0 : 1,
+        borderColor: isDarkTheme ? 'transparent' : 'rgba(255, 255, 255, 0.3)',
+    },
+    bottomNavContent: {
+        flex: 1,
         flexDirection: 'row',
-        justifyContent: 'space-between',
+        justifyContent: 'space-around',
+        alignItems: 'center',
+        paddingHorizontal: 12,
+        paddingTop: 12,
     },
     bottomNavItem: {
         flex: 1,
         alignItems: 'center',
         justifyContent: 'center',
+        paddingVertical: 8,
+        paddingHorizontal: 8,
+        minHeight: 68,
     },
     bottomNavItemContent: {
         alignItems: 'center',
         justifyContent: 'center',
         position: 'relative',
-        minHeight: 50,
+        width: '100%',
     },
-    bottomNavIconWrapper: {
-        marginBottom: 4,
+    bottomNavIconContainer: {
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginBottom: 6,
+        position: 'relative',
+        width: 48,
+        height: 48,
+    },
+    bottomNavUnderline: {
+        position: 'absolute',
+        bottom: 8,
+        left: 0,
+        width: 40,
+        height: 3,
+        borderRadius: 2,
+        backgroundColor: isDarkTheme ? '#7C9AFF' : '#1A73E8',
     },
     bottomNavLabelWrapper: {
         alignItems: 'center',
         justifyContent: 'center',
+        marginTop: 2,
         minWidth: 50,
-        height: 16,
+        height: 14,
     },
     bottomNavLabel: {
         fontSize: 11,
-        fontWeight: '600',
-        letterSpacing: 0.3,
+        fontWeight: '500',
+        letterSpacing: 0.2,
     },
     notificationOverlay: {
         position: 'absolute',
