@@ -19,11 +19,16 @@ import { StatusBar } from 'expo-status-bar';
 import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
 import { CameraView, useCameraPermissions } from 'expo-camera';
+import * as Clipboard from 'expo-clipboard';
+import * as ImagePicker from 'expo-image-picker';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 
 interface HomeScreenProps {
     userName: string;
+    onLogout: () => void;
+    initialLanguage?: 'en' | 'ar';
 }
 
 const ACTION_CARD_WIDTH = 300;
@@ -93,6 +98,13 @@ const translations = {
         allowCamera: 'Allow camera access',
         cameraRequired: 'Camera access is required to scan products.',
         startScanning: 'Start scanning',
+        quickScan: 'Quick scan',
+        quickScanSubtitle: 'Paste a link, upload a photo, or open the camera.',
+        linkPlaceholder: 'Paste or type a product link',
+        scanLink: 'Scan link',
+        pasteLink: 'Paste link',
+        uploadImage: 'Upload image',
+        openCamera: 'Open camera',
         recentScans: 'Recent scans',
         
         // Profile
@@ -278,6 +290,13 @@ const translations = {
         allowCamera: 'السماح بالوصول للكاميرا',
         cameraRequired: 'يتطلب الوصول إلى الكاميرا لمسح المنتجات.',
         startScanning: 'بدء المسح',
+        quickScan: 'مسح سريع',
+        quickScanSubtitle: 'الصق رابطاً أو ارفع صورة أو افتح الكاميرا.',
+        linkPlaceholder: 'ألصق أو اكتب رابط المنتج',
+        scanLink: 'مسح الرابط',
+        pasteLink: 'لصق الرابط',
+        uploadImage: 'رفع صورة',
+        openCamera: 'افتح الكاميرا',
         recentScans: 'عمليات المسح الأخيرة',
         
         // Profile
@@ -425,7 +444,7 @@ const translations = {
     },
 };
 
-export function HomeScreen({ userName }: HomeScreenProps) {
+export function HomeScreen({ userName, onLogout, initialLanguage = 'en' }: HomeScreenProps) {
     const insets = useSafeAreaInsets();
     const screenWidth = Dimensions.get('window').width;
     const drawerWidth = screenWidth * 0.75;
@@ -494,6 +513,8 @@ export function HomeScreen({ userName }: HomeScreenProps) {
     const [isSubscriptionsOpen, setIsSubscriptionsOpen] = useState(false);
     const [isNotificationOpen, setIsNotificationOpen] = useState(false);
     const [isFilterOpen, setIsFilterOpen] = useState(false);
+    const [isSubscriptionModalOpen, setIsSubscriptionModalOpen] = useState(false);
+    const [selectedPlan, setSelectedPlan] = useState<'standard' | 'pro' | 'premium'>('pro');
     const [priceRange, setPriceRange] = useState({ min: '', max: '' });
     const [selectedLocation, setSelectedLocation] = useState<string | null>(null);
     const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
@@ -507,9 +528,10 @@ export function HomeScreen({ userName }: HomeScreenProps) {
     const [typedWelcome, setTypedWelcome] = useState('');
     const [reduceMotion, setReduceMotion] = useState(false);
     const [isDarkTheme, setIsDarkTheme] = useState(false);
-    const [isArabic, setIsArabic] = useState(false);
+    const [isArabic, setIsArabic] = useState(initialLanguage === 'ar');
     const [permission, requestCameraPermission] = useCameraPermissions();
     const [lastScannedValue, setLastScannedValue] = useState<string | null>(null);
+    const [linkInput, setLinkInput] = useState('');
     
     
     // Get current theme colors and translations
@@ -948,6 +970,84 @@ export function HomeScreen({ userName }: HomeScreenProps) {
         }).start();
     };
 
+    // Gesture Handlers
+    const tabOrder: Array<'home' | 'scan' | 'about' | 'profile'> = ['home', 'scan', 'about', 'profile'];
+
+    // Horizontal swipe for page navigation
+    const horizontalPanGesture = Gesture.Pan()
+        .onUpdate((event) => {
+            // Only handle horizontal swipes (not when scrolling vertically)
+            if (Math.abs(event.velocityY) > Math.abs(event.velocityX)) {
+                return;
+            }
+        })
+        .onEnd((event) => {
+            const currentIndex = tabOrder.indexOf(activeNav);
+            const swipeThreshold = 50;
+            const velocityThreshold = 500;
+
+            // Swipe left (next page)
+            if ((event.translationX < -swipeThreshold || event.velocityX < -velocityThreshold) && currentIndex < tabOrder.length - 1) {
+                setActiveNav(tabOrder[currentIndex + 1]);
+            }
+            // Swipe right (previous page)
+            else if ((event.translationX > swipeThreshold || event.velocityX > velocityThreshold) && currentIndex > 0) {
+                setActiveNav(tabOrder[currentIndex - 1]);
+            }
+        })
+        .runOnJS(true);
+
+    // Left edge swipe for menu (only on home page)
+    const menuEdgeGesture = Gesture.Pan()
+        .onUpdate((event) => {
+            // Only trigger if starting from left edge and on home page
+            if (activeNav === 'home' && event.absoluteX < 50 && event.translationX > 0) {
+                const progress = Math.min(event.translationX / drawerWidth, 1);
+                menuProgress.setValue(progress);
+            }
+        })
+        .onEnd((event) => {
+            if (activeNav === 'home' && event.absoluteX < 50 && event.translationX > drawerWidth * 0.3) {
+                openMenu();
+            } else {
+                Animated.timing(menuProgress, {
+                    toValue: 0,
+                    duration: 200,
+                    useNativeDriver: true,
+                }).start();
+            }
+        })
+        .runOnJS(true);
+
+    // Vertical swipe from top for notifications
+    const notificationPullGesture = Gesture.Pan()
+        .onUpdate((event) => {
+            // Only trigger if swiping down from near the top
+            if (event.absoluteY < 100 && event.translationY > 0) {
+                const progress = Math.min(event.translationY / 150, 1);
+                notificationProgress.setValue(progress);
+            }
+        })
+        .onEnd((event) => {
+            if (event.absoluteY < 100 && event.translationY > 80) {
+                openNotification();
+            } else {
+                Animated.timing(notificationProgress, {
+                    toValue: 0,
+                    duration: 200,
+                    useNativeDriver: true,
+                }).start();
+            }
+        })
+        .runOnJS(true);
+
+    // Combine gestures
+    const combinedGesture = Gesture.Race(
+        notificationPullGesture,
+        menuEdgeGesture,
+        horizontalPanGesture
+    );
+
     // Get sort options with translations
     const sortOptions = [
         { id: 'price-low', label: t.lowToHigh },
@@ -1318,6 +1418,7 @@ export function HomeScreen({ userName }: HomeScreenProps) {
     return (
         <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
             <StatusBar style="dark" />
+            <GestureDetector gesture={combinedGesture}>
             <Animated.View
                 style={[
                     styles.container,
@@ -1897,7 +1998,7 @@ export function HomeScreen({ userName }: HomeScreenProps) {
                                             onPress={() =>
                                                 Alert.alert('Log out', 'Are you sure you want to log out?', [
                                                     { text: 'Cancel', style: 'cancel' },
-                                                    { text: 'Log out', style: 'destructive' },
+                                                    { text: 'Log out', style: 'destructive', onPress: onLogout },
                                                 ])
                                             }
                                         >
@@ -2343,6 +2444,88 @@ export function HomeScreen({ userName }: HomeScreenProps) {
                                 </Text>
                             </View>
 
+                            <View style={styles.quickSection}>
+                                <View style={styles.quickInputRow}>
+                                    <MaterialCommunityIcons
+                                        name="link-variant"
+                                        size={18}
+                                        color={COLORS.textSecondary}
+                                        style={{ marginHorizontal: 6 }}
+                                    />
+                                    <TextInput
+                                        value={linkInput}
+                                        onChangeText={setLinkInput}
+                                        placeholder={t.linkPlaceholder}
+                                        placeholderTextColor={COLORS.textSecondary}
+                                        style={styles.quickInput}
+                                        autoCapitalize="none"
+                                        autoCorrect={false}
+                                    />
+                                    <TouchableOpacity
+                                        style={styles.quickPrimary}
+                                        activeOpacity={0.9}
+                                        onPress={() => {
+                                            if (!linkInput.trim()) {
+                                                Alert.alert('Missing link', 'Please paste or type a link to scan.');
+                                                return;
+                                            }
+                                            Alert.alert('Scanning link', linkInput.trim());
+                                        }}
+                                    >
+                                        <Text style={styles.quickPrimaryText}>{t.scanLink}</Text>
+                                    </TouchableOpacity>
+                                </View>
+                                <View style={styles.quickActionsRow}>
+                                    <TouchableOpacity
+                                        style={styles.quickGhost}
+                                        activeOpacity={0.9}
+                                        onPress={async () => {
+                                            const text = await Clipboard.getStringAsync();
+                                            if (!text) {
+                                                Alert.alert('Clipboard empty', 'Copy a link first, then paste.');
+                                                return;
+                                            }
+                                            setLinkInput(text);
+                                        }}
+                                    >
+                                        <MaterialCommunityIcons
+                                            name="content-paste"
+                                            size={16}
+                                            color={COLORS.text}
+                                            style={{ marginRight: 6 }}
+                                        />
+                                        <Text style={styles.quickGhostText}>{t.pasteLink}</Text>
+                                    </TouchableOpacity>
+
+                                    <TouchableOpacity
+                                        style={styles.quickGhost}
+                                        activeOpacity={0.9}
+                                        onPress={async () => {
+                                            const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
+                                            if (!permissionResult.granted) {
+                                                Alert.alert('Permission needed', 'Allow access to your photos to upload an image.');
+                                                return;
+                                            }
+                                            const result = await ImagePicker.launchImageLibraryAsync({
+                                                mediaTypes: ImagePicker.MediaTypeOptions.Images,
+                                                quality: 0.8,
+                                            });
+                                            if (!result.canceled && result.assets?.length) {
+                                                Alert.alert('Image selected', 'We will scan this image shortly.');
+                                            }
+                                        }}
+                                    >
+                                        <MaterialCommunityIcons
+                                            name="image-multiple"
+                                            size={16}
+                                            color={COLORS.text}
+                                            style={{ marginRight: 6 }}
+                                        />
+                                        <Text style={styles.quickGhostText}>{t.uploadImage}</Text>
+                                    </TouchableOpacity>
+                                </View>
+                            </View>
+
                             <View style={styles.scanFrame}>
                                 {!permission?.granted && (
                                     <View style={styles.scanPermissionContainer}>
@@ -2462,199 +2645,431 @@ export function HomeScreen({ userName }: HomeScreenProps) {
                             onScroll={handleScroll}
                         >
                             <View style={styles.aboutContainer}>
-                                {/* Hero Section */}
-                                <View style={styles.aboutHero}>
-                                    <View style={styles.aboutIconCircle}>
-                                        <MaterialCommunityIcons
-                                            name="magnify"
-                                            size={48}
-                                            color={COLORS.primaryBlue}
-                                        />
-                                    </View>
-                                    <Text style={styles.aboutHeroTitle}>{t.priceScanner}</Text>
-                                    <Text style={styles.aboutHeroSubtitle}>
-                                        {t.findRealPrices}
-                                    </Text>
-                                </View>
-
-                                {/* Main Message Section */}
-                                <View style={styles.aboutSection}>
-                                    <View style={styles.aboutFeatureCard}>
-                                        <View style={styles.aboutFeatureIcon}>
-                                            <MaterialCommunityIcons
-                                                name="alert-circle"
-                                                size={32}
-                                                color="#EF4444"
-                                            />
+                                {/* Hero Section - Modern AI Style */}
+                                <View style={styles.aboutHeroCard}>
+                                    <BlurView intensity={isDarkTheme ? 20 : 15} tint={isDarkTheme ? "dark" : "light"} style={StyleSheet.absoluteFill} />
+                                    <LinearGradient
+                                        colors={isDarkTheme 
+                                            ? ['rgba(26, 26, 26, 0.85)', 'rgba(31, 31, 31, 0.9)']
+                                            : ['rgba(255, 255, 255, 0.8)', 'rgba(247, 250, 255, 0.75)']}
+                                        start={{ x: 0, y: 0 }}
+                                        end={{ x: 0, y: 1 }}
+                                        style={StyleSheet.absoluteFill}
+                                    />
+                                    <View style={styles.aboutHero}>
+                                        <View style={styles.aboutIconGlow} />
+                                        <View style={styles.aboutIconCircle}>
+                                            <LinearGradient
+                                                colors={['#1A73E8', '#4285F4', '#5C9EFF']}
+                                                start={{ x: 0, y: 0 }}
+                                                end={{ x: 1, y: 1 }}
+                                                style={styles.aboutIconGradient}
+                                            >
+                                                <MaterialCommunityIcons
+                                                    name="magnify"
+                                                    size={48}
+                                                    color="#FFFFFF"
+                                                />
+                                            </LinearGradient>
                                         </View>
-                                        <Text style={styles.aboutFeatureTitle}>
-                                            {t.everyoneLying}
-                                        </Text>
-                                        <Text style={styles.aboutFeatureText}>
-                                            {t.everyoneLyingText}
+                                        <Text style={styles.aboutHeroTitle}>{t.priceScanner}</Text>
+                                        <Text style={styles.aboutHeroSubtitle}>
+                                            {t.findRealPrices}
                                         </Text>
                                     </View>
                                 </View>
 
-                                {/* Purpose Section */}
+                                {/* Main Message Section - Modern Alert Card */}
+                                <View style={styles.aboutSection}>
+                                    <View style={styles.aboutAlertCard}>
+                                        <BlurView intensity={isDarkTheme ? 20 : 15} tint={isDarkTheme ? "dark" : "light"} style={StyleSheet.absoluteFill} />
+                                        <LinearGradient
+                                            colors={isDarkTheme 
+                                                ? ['rgba(239, 68, 68, 0.15)', 'rgba(220, 38, 38, 0.1)']
+                                                : ['rgba(254, 242, 242, 0.9)', 'rgba(255, 255, 255, 0.8)']}
+                                            start={{ x: 0, y: 0 }}
+                                            end={{ x: 0, y: 1 }}
+                                            style={StyleSheet.absoluteFill}
+                                        />
+                                        <View style={styles.aboutAlertContent}>
+                                            <View style={styles.aboutAlertIconWrapper}>
+                                                <View style={styles.aboutAlertIconGlow} />
+                                                <MaterialCommunityIcons
+                                                    name="alert-circle"
+                                                    size={36}
+                                                    color="#EF4444"
+                                                />
+                                            </View>
+                                            <Text style={styles.aboutFeatureTitle}>
+                                                {t.everyoneLying}
+                                            </Text>
+                                            <Text style={styles.aboutFeatureText}>
+                                                {t.everyoneLyingText}
+                                            </Text>
+                                        </View>
+                                    </View>
+                                </View>
+
+                                {/* Purpose Section - Modern Card */}
                                 <View style={styles.aboutSection}>
                                     <Text style={styles.aboutSectionTitle}>{t.ourPurpose}</Text>
                                     <View style={styles.aboutPurposeCard}>
-                                        <MaterialCommunityIcons
-                                            name="target"
-                                            size={28}
-                                            color={COLORS.primaryBlue}
+                                        <BlurView intensity={isDarkTheme ? 20 : 15} tint={isDarkTheme ? "dark" : "light"} style={StyleSheet.absoluteFill} />
+                                        <LinearGradient
+                                            colors={isDarkTheme 
+                                                ? ['rgba(26, 26, 26, 0.85)', 'rgba(31, 31, 31, 0.9)']
+                                                : ['rgba(255, 255, 255, 0.8)', 'rgba(247, 250, 255, 0.75)']}
+                                            start={{ x: 0, y: 0 }}
+                                            end={{ x: 0, y: 1 }}
+                                            style={StyleSheet.absoluteFill}
                                         />
-                                        <Text style={styles.aboutPurposeTitle}>
-                                            {t.findActualPrices}
-                                        </Text>
-                                        <Text style={styles.aboutPurposeText}>
-                                            {t.findActualPricesText}
-                                        </Text>
+                                        <View style={styles.aboutPurposeContent}>
+                                            <View style={styles.aboutPurposeIconWrapper}>
+                                                <LinearGradient
+                                                    colors={['#1A73E8', '#4285F4']}
+                                                    start={{ x: 0, y: 0 }}
+                                                    end={{ x: 1, y: 1 }}
+                                                    style={styles.aboutPurposeIconGradient}
+                                                >
+                                                    <MaterialCommunityIcons
+                                                        name="target"
+                                                        size={32}
+                                                        color="#FFFFFF"
+                                                    />
+                                                </LinearGradient>
+                                            </View>
+                                            <Text style={styles.aboutPurposeTitle}>
+                                                {t.findActualPrices}
+                                            </Text>
+                                            <Text style={styles.aboutPurposeText}>
+                                                {t.findActualPricesText}
+                                            </Text>
+                                        </View>
                                     </View>
                                 </View>
 
-                                {/* How It Works */}
+                                {/* How It Works - Modern Step Cards */}
                                 <View style={styles.aboutSection}>
                                     <Text style={styles.aboutSectionTitle}>{t.howItWorks}</Text>
                                     
                                     <View style={styles.aboutStepCard}>
-                                        <View style={styles.aboutStepNumber}>
-                                            <Text style={styles.aboutStepNumberText}>1</Text>
-                                        </View>
-                                        <View style={styles.aboutStepContent}>
-                                            <Text style={styles.aboutStepTitle}>{t.step1Title}</Text>
-                                            <Text style={styles.aboutStepText}>
-                                                {t.step1Text}
-                                            </Text>
-                                        </View>
-                                        <MaterialCommunityIcons
-                                            name="barcode-scan"
-                                            size={24}
-                                            color={COLORS.primaryBlue}
+                                        <BlurView intensity={isDarkTheme ? 20 : 15} tint={isDarkTheme ? "dark" : "light"} style={StyleSheet.absoluteFill} />
+                                        <LinearGradient
+                                            colors={isDarkTheme 
+                                                ? ['rgba(26, 26, 26, 0.85)', 'rgba(31, 31, 31, 0.9)']
+                                                : ['rgba(255, 255, 255, 0.8)', 'rgba(247, 250, 255, 0.75)']}
+                                            start={{ x: 0, y: 0 }}
+                                            end={{ x: 0, y: 1 }}
+                                            style={StyleSheet.absoluteFill}
                                         />
+                                        <View style={styles.aboutStepContentWrapper}>
+                                            <View style={styles.aboutStepNumber}>
+                                                <LinearGradient
+                                                    colors={['#1A73E8', '#4285F4']}
+                                                    start={{ x: 0, y: 0 }}
+                                                    end={{ x: 1, y: 1 }}
+                                                    style={styles.aboutStepNumberGradient}
+                                                >
+                                                    <Text style={styles.aboutStepNumberText}>1</Text>
+                                                </LinearGradient>
+                                            </View>
+                                            <View style={styles.aboutStepContent}>
+                                                <Text style={styles.aboutStepTitle}>{t.step1Title}</Text>
+                                                <Text style={styles.aboutStepText}>
+                                                    {t.step1Text}
+                                                </Text>
+                                            </View>
+                                            <View style={styles.aboutStepIconWrapper}>
+                                                <MaterialCommunityIcons
+                                                    name="barcode-scan"
+                                                    size={28}
+                                                    color={COLORS.primaryBlue}
+                                                />
+                                            </View>
+                                        </View>
                                     </View>
 
                                     <View style={styles.aboutStepCard}>
-                                        <View style={styles.aboutStepNumber}>
-                                            <Text style={styles.aboutStepNumberText}>2</Text>
-                                        </View>
-                                        <View style={styles.aboutStepContent}>
-                                            <Text style={styles.aboutStepTitle}>{t.step2Title}</Text>
-                                            <Text style={styles.aboutStepText}>
-                                                {t.step2Text}
-                                            </Text>
-                                        </View>
-                                        <MaterialCommunityIcons
-                                            name="robot"
-                                            size={24}
-                                            color={COLORS.primaryBlue}
+                                        <BlurView intensity={isDarkTheme ? 20 : 15} tint={isDarkTheme ? "dark" : "light"} style={StyleSheet.absoluteFill} />
+                                        <LinearGradient
+                                            colors={isDarkTheme 
+                                                ? ['rgba(26, 26, 26, 0.85)', 'rgba(31, 31, 31, 0.9)']
+                                                : ['rgba(255, 255, 255, 0.8)', 'rgba(247, 250, 255, 0.75)']}
+                                            start={{ x: 0, y: 0 }}
+                                            end={{ x: 0, y: 1 }}
+                                            style={StyleSheet.absoluteFill}
                                         />
+                                        <View style={styles.aboutStepContentWrapper}>
+                                            <View style={styles.aboutStepNumber}>
+                                                <LinearGradient
+                                                    colors={['#1A73E8', '#4285F4']}
+                                                    start={{ x: 0, y: 0 }}
+                                                    end={{ x: 1, y: 1 }}
+                                                    style={styles.aboutStepNumberGradient}
+                                                >
+                                                    <Text style={styles.aboutStepNumberText}>2</Text>
+                                                </LinearGradient>
+                                            </View>
+                                            <View style={styles.aboutStepContent}>
+                                                <Text style={styles.aboutStepTitle}>{t.step2Title}</Text>
+                                                <Text style={styles.aboutStepText}>
+                                                    {t.step2Text}
+                                                </Text>
+                                            </View>
+                                            <View style={styles.aboutStepIconWrapper}>
+                                                <MaterialCommunityIcons
+                                                    name="robot"
+                                                    size={28}
+                                                    color={COLORS.primaryBlue}
+                                                />
+                                            </View>
+                                        </View>
                                     </View>
 
                                     <View style={styles.aboutStepCard}>
-                                        <View style={styles.aboutStepNumber}>
-                                            <Text style={styles.aboutStepNumberText}>3</Text>
-                                        </View>
-                                        <View style={styles.aboutStepContent}>
-                                            <Text style={styles.aboutStepTitle}>{t.step3Title}</Text>
-                                            <Text style={styles.aboutStepText}>
-                                                {t.step3Text}
-                                            </Text>
-                                        </View>
-                                        <MaterialCommunityIcons
-                                            name="chart-line"
-                                            size={24}
-                                            color={COLORS.primaryBlue}
+                                        <BlurView intensity={isDarkTheme ? 20 : 15} tint={isDarkTheme ? "dark" : "light"} style={StyleSheet.absoluteFill} />
+                                        <LinearGradient
+                                            colors={isDarkTheme 
+                                                ? ['rgba(26, 26, 26, 0.85)', 'rgba(31, 31, 31, 0.9)']
+                                                : ['rgba(255, 255, 255, 0.8)', 'rgba(247, 250, 255, 0.75)']}
+                                            start={{ x: 0, y: 0 }}
+                                            end={{ x: 0, y: 1 }}
+                                            style={StyleSheet.absoluteFill}
                                         />
+                                        <View style={styles.aboutStepContentWrapper}>
+                                            <View style={styles.aboutStepNumber}>
+                                                <LinearGradient
+                                                    colors={['#1A73E8', '#4285F4']}
+                                                    start={{ x: 0, y: 0 }}
+                                                    end={{ x: 1, y: 1 }}
+                                                    style={styles.aboutStepNumberGradient}
+                                                >
+                                                    <Text style={styles.aboutStepNumberText}>3</Text>
+                                                </LinearGradient>
+                                            </View>
+                                            <View style={styles.aboutStepContent}>
+                                                <Text style={styles.aboutStepTitle}>{t.step3Title}</Text>
+                                                <Text style={styles.aboutStepText}>
+                                                    {t.step3Text}
+                                                </Text>
+                                            </View>
+                                            <View style={styles.aboutStepIconWrapper}>
+                                                <MaterialCommunityIcons
+                                                    name="chart-line"
+                                                    size={28}
+                                                    color={COLORS.primaryBlue}
+                                                />
+                                            </View>
+                                        </View>
                                     </View>
 
                                     <View style={styles.aboutStepCard}>
-                                        <View style={styles.aboutStepNumber}>
-                                            <Text style={styles.aboutStepNumberText}>4</Text>
-                                        </View>
-                                        <View style={styles.aboutStepContent}>
-                                            <Text style={styles.aboutStepTitle}>{t.step4Title}</Text>
-                                            <Text style={styles.aboutStepText}>
-                                                {t.step4Text}
-                                            </Text>
-                                        </View>
-                                        <MaterialCommunityIcons
-                                            name="wallet"
-                                            size={24}
-                                            color={COLORS.primaryBlue}
+                                        <BlurView intensity={isDarkTheme ? 20 : 15} tint={isDarkTheme ? "dark" : "light"} style={StyleSheet.absoluteFill} />
+                                        <LinearGradient
+                                            colors={isDarkTheme 
+                                                ? ['rgba(26, 26, 26, 0.85)', 'rgba(31, 31, 31, 0.9)']
+                                                : ['rgba(255, 255, 255, 0.8)', 'rgba(247, 250, 255, 0.75)']}
+                                            start={{ x: 0, y: 0 }}
+                                            end={{ x: 0, y: 1 }}
+                                            style={StyleSheet.absoluteFill}
                                         />
+                                        <View style={styles.aboutStepContentWrapper}>
+                                            <View style={styles.aboutStepNumber}>
+                                                <LinearGradient
+                                                    colors={['#1A73E8', '#4285F4']}
+                                                    start={{ x: 0, y: 0 }}
+                                                    end={{ x: 1, y: 1 }}
+                                                    style={styles.aboutStepNumberGradient}
+                                                >
+                                                    <Text style={styles.aboutStepNumberText}>4</Text>
+                                                </LinearGradient>
+                                            </View>
+                                            <View style={styles.aboutStepContent}>
+                                                <Text style={styles.aboutStepTitle}>{t.step4Title}</Text>
+                                                <Text style={styles.aboutStepText}>
+                                                    {t.step4Text}
+                                                </Text>
+                                            </View>
+                                            <View style={styles.aboutStepIconWrapper}>
+                                                <MaterialCommunityIcons
+                                                    name="wallet"
+                                                    size={28}
+                                                    color={COLORS.primaryBlue}
+                                                />
+                                            </View>
+                                        </View>
                                     </View>
                                 </View>
 
-                                {/* Key Features */}
+                                {/* Key Features - Modern Grid */}
                                 <View style={styles.aboutSection}>
                                     <Text style={styles.aboutSectionTitle}>{t.whyPriceScanner}</Text>
                                     
                                     <View style={styles.aboutFeatureGrid}>
                                         <View style={styles.aboutFeatureItem}>
-                                            <MaterialCommunityIcons
-                                                name="shield-check"
-                                                size={28}
-                                                color="#10B981"
+                                            <BlurView intensity={isDarkTheme ? 20 : 15} tint={isDarkTheme ? "dark" : "light"} style={StyleSheet.absoluteFill} />
+                                            <LinearGradient
+                                                colors={isDarkTheme 
+                                                    ? ['rgba(26, 26, 26, 0.85)', 'rgba(31, 31, 31, 0.9)']
+                                                    : ['rgba(255, 255, 255, 0.8)', 'rgba(247, 250, 255, 0.75)']}
+                                                start={{ x: 0, y: 0 }}
+                                                end={{ x: 0, y: 1 }}
+                                                style={StyleSheet.absoluteFill}
                                             />
-                                            <Text style={styles.aboutFeatureItemTitle}>{t.noLies}</Text>
-                                            <Text style={styles.aboutFeatureItemText}>
-                                                {t.noLiesText}
-                                            </Text>
+                                            <View style={styles.aboutFeatureItemContent}>
+                                                <View style={styles.aboutFeatureItemIconWrapper}>
+                                                    <LinearGradient
+                                                        colors={['#10B981', '#34D399']}
+                                                        start={{ x: 0, y: 0 }}
+                                                        end={{ x: 1, y: 1 }}
+                                                        style={styles.aboutFeatureItemIconGradient}
+                                                    >
+                                                        <MaterialCommunityIcons
+                                                            name="shield-check"
+                                                            size={24}
+                                                            color="#FFFFFF"
+                                                        />
+                                                    </LinearGradient>
+                                                </View>
+                                                <Text style={styles.aboutFeatureItemTitle}>{t.noLies}</Text>
+                                                <Text style={styles.aboutFeatureItemText}>
+                                                    {t.noLiesText}
+                                                </Text>
+                                            </View>
                                         </View>
 
                                         <View style={styles.aboutFeatureItem}>
-                                            <MaterialCommunityIcons
-                                                name="store"
-                                                size={28}
-                                                color={COLORS.primaryBlue}
+                                            <BlurView intensity={isDarkTheme ? 20 : 15} tint={isDarkTheme ? "dark" : "light"} style={StyleSheet.absoluteFill} />
+                                            <LinearGradient
+                                                colors={isDarkTheme 
+                                                    ? ['rgba(26, 26, 26, 0.85)', 'rgba(31, 31, 31, 0.9)']
+                                                    : ['rgba(255, 255, 255, 0.8)', 'rgba(247, 250, 255, 0.75)']}
+                                                start={{ x: 0, y: 0 }}
+                                                end={{ x: 0, y: 1 }}
+                                                style={StyleSheet.absoluteFill}
                                             />
-                                            <Text style={styles.aboutFeatureItemTitle}>{t.multipleStores}</Text>
-                                            <Text style={styles.aboutFeatureItemText}>
-                                                {t.multipleStoresText}
-                                            </Text>
+                                            <View style={styles.aboutFeatureItemContent}>
+                                                <View style={styles.aboutFeatureItemIconWrapper}>
+                                                    <LinearGradient
+                                                        colors={['#1A73E8', '#4285F4']}
+                                                        start={{ x: 0, y: 0 }}
+                                                        end={{ x: 1, y: 1 }}
+                                                        style={styles.aboutFeatureItemIconGradient}
+                                                    >
+                                                        <MaterialCommunityIcons
+                                                            name="store"
+                                                            size={24}
+                                                            color="#FFFFFF"
+                                                        />
+                                                    </LinearGradient>
+                                                </View>
+                                                <Text style={styles.aboutFeatureItemTitle}>{t.multipleStores}</Text>
+                                                <Text style={styles.aboutFeatureItemText}>
+                                                    {t.multipleStoresText}
+                                                </Text>
+                                            </View>
                                         </View>
 
                                         <View style={styles.aboutFeatureItem}>
-                                            <MaterialCommunityIcons
-                                                name="lightning-bolt"
-                                                size={28}
-                                                color="#F59E0B"
+                                            <BlurView intensity={isDarkTheme ? 20 : 15} tint={isDarkTheme ? "dark" : "light"} style={StyleSheet.absoluteFill} />
+                                            <LinearGradient
+                                                colors={isDarkTheme 
+                                                    ? ['rgba(26, 26, 26, 0.85)', 'rgba(31, 31, 31, 0.9)']
+                                                    : ['rgba(255, 255, 255, 0.8)', 'rgba(247, 250, 255, 0.75)']}
+                                                start={{ x: 0, y: 0 }}
+                                                end={{ x: 0, y: 1 }}
+                                                style={StyleSheet.absoluteFill}
                                             />
-                                            <Text style={styles.aboutFeatureItemTitle}>{t.realTime}</Text>
-                                            <Text style={styles.aboutFeatureItemText}>
-                                                {t.realTimeText}
-                                            </Text>
+                                            <View style={styles.aboutFeatureItemContent}>
+                                                <View style={styles.aboutFeatureItemIconWrapper}>
+                                                    <LinearGradient
+                                                        colors={['#F59E0B', '#FBBF24']}
+                                                        start={{ x: 0, y: 0 }}
+                                                        end={{ x: 1, y: 1 }}
+                                                        style={styles.aboutFeatureItemIconGradient}
+                                                    >
+                                                        <MaterialCommunityIcons
+                                                            name="lightning-bolt"
+                                                            size={24}
+                                                            color="#FFFFFF"
+                                                        />
+                                                    </LinearGradient>
+                                                </View>
+                                                <Text style={styles.aboutFeatureItemTitle}>{t.realTime}</Text>
+                                                <Text style={styles.aboutFeatureItemText}>
+                                                    {t.realTimeText}
+                                                </Text>
+                                            </View>
                                         </View>
 
                                         <View style={styles.aboutFeatureItem}>
-                                            <MaterialCommunityIcons
-                                                name="brain"
-                                                size={28}
-                                                color="#8B5CF6"
+                                            <BlurView intensity={isDarkTheme ? 20 : 15} tint={isDarkTheme ? "dark" : "light"} style={StyleSheet.absoluteFill} />
+                                            <LinearGradient
+                                                colors={isDarkTheme 
+                                                    ? ['rgba(26, 26, 26, 0.85)', 'rgba(31, 31, 31, 0.9)']
+                                                    : ['rgba(255, 255, 255, 0.8)', 'rgba(247, 250, 255, 0.75)']}
+                                                start={{ x: 0, y: 0 }}
+                                                end={{ x: 0, y: 1 }}
+                                                style={StyleSheet.absoluteFill}
                                             />
-                                            <Text style={styles.aboutFeatureItemTitle}>{t.aiPowered}</Text>
-                                            <Text style={styles.aboutFeatureItemText}>
-                                                {t.aiPoweredText}
-                                            </Text>
+                                            <View style={styles.aboutFeatureItemContent}>
+                                                <View style={styles.aboutFeatureItemIconWrapper}>
+                                                    <LinearGradient
+                                                        colors={['#8B5CF6', '#A78BFA']}
+                                                        start={{ x: 0, y: 0 }}
+                                                        end={{ x: 1, y: 1 }}
+                                                        style={styles.aboutFeatureItemIconGradient}
+                                                    >
+                                                        <MaterialCommunityIcons
+                                                            name="brain"
+                                                            size={24}
+                                                            color="#FFFFFF"
+                                                        />
+                                                    </LinearGradient>
+                                                </View>
+                                                <Text style={styles.aboutFeatureItemTitle}>{t.aiPowered}</Text>
+                                                <Text style={styles.aboutFeatureItemText}>
+                                                    {t.aiPoweredText}
+                                                </Text>
+                                            </View>
                                         </View>
                                     </View>
                                 </View>
 
-                                {/* Bottom Message */}
+                                {/* Bottom Message - Modern CTA Card */}
                                 <View style={styles.aboutBottomCard}>
-                                    <MaterialCommunityIcons
-                                        name="check-circle"
-                                        size={32}
-                                        color="#10B981"
+                                    <BlurView intensity={isDarkTheme ? 20 : 15} tint={isDarkTheme ? "dark" : "light"} style={StyleSheet.absoluteFill} />
+                                    <LinearGradient
+                                        colors={isDarkTheme 
+                                            ? ['rgba(16, 185, 129, 0.2)', 'rgba(5, 150, 105, 0.15)']
+                                            : ['rgba(236, 253, 245, 0.9)', 'rgba(209, 250, 229, 0.8)']}
+                                        start={{ x: 0, y: 0 }}
+                                        end={{ x: 0, y: 1 }}
+                                        style={StyleSheet.absoluteFill}
                                     />
-                                    <Text style={styles.aboutBottomTitle}>
-                                        {t.bestPriceExists}
-                                    </Text>
-                                    <Text style={styles.aboutBottomText}>
-                                        {t.stopBelieving}
-                                    </Text>
+                                    <View style={styles.aboutBottomContent}>
+                                        <View style={styles.aboutBottomIconWrapper}>
+                                            <View style={styles.aboutBottomIconGlow} />
+                                            <LinearGradient
+                                                colors={['#10B981', '#34D399']}
+                                                start={{ x: 0, y: 0 }}
+                                                end={{ x: 1, y: 1 }}
+                                                style={styles.aboutBottomIconGradient}
+                                            >
+                                                <MaterialCommunityIcons
+                                                    name="check-circle"
+                                                    size={36}
+                                                    color="#FFFFFF"
+                                                />
+                                            </LinearGradient>
+                                        </View>
+                                        <Text style={styles.aboutBottomTitle}>
+                                            {t.bestPriceExists}
+                                        </Text>
+                                        <Text style={styles.aboutBottomText}>
+                                            {t.stopBelieving}
+                                        </Text>
+                                    </View>
                                 </View>
                             </View>
                         </ScrollView>
@@ -2679,116 +3094,301 @@ export function HomeScreen({ userName }: HomeScreenProps) {
                             onScroll={handleScroll}
                         >
                             <View style={styles.profileContainer}>
-                            <View style={styles.profileHeader}>
-                                <View style={styles.profileAvatar}>
-                                    <Text style={styles.profileAvatarInitials}>
-                                        {userName
-                                            .split(' ')
-                                            .map((n) => n[0])
-                                            .join('')
-                                            .slice(0, 2)
-                                            .toUpperCase()}
-                                    </Text>
-                                </View>
-                                <View style={styles.profileTextBlock}>
-                                    <View style={styles.profileNameRow}>
-                                        <Text style={styles.profileName}>{userName}</Text>
-                                        <View style={styles.profileBadge}>
-                                            <MaterialCommunityIcons
-                                                name="check-decagram"
-                                                size={14}
-                                                color="#FFFFFF"
-                                            />
+                            {/* Profile Header Card */}
+                            <View style={styles.profileHeaderCard}>
+                                <BlurView intensity={isDarkTheme ? 20 : 15} tint={isDarkTheme ? "dark" : "light"} style={StyleSheet.absoluteFill} />
+                                <LinearGradient
+                                    colors={isDarkTheme 
+                                        ? ['rgba(26, 26, 26, 0.85)', 'rgba(31, 31, 31, 0.9)']
+                                        : ['rgba(255, 255, 255, 0.8)', 'rgba(247, 250, 255, 0.75)']}
+                                    start={{ x: 0, y: 0 }}
+                                    end={{ x: 0, y: 1 }}
+                                    style={StyleSheet.absoluteFill}
+                                />
+                                <View style={styles.profileHeader}>
+                                    <View style={styles.profileAvatarWrapper}>
+                                        <View style={styles.profileAvatarGlow} />
+                                        <View style={styles.profileAvatar}>
+                                            <LinearGradient
+                                                colors={['#1A73E8', '#4285F4']}
+                                                start={{ x: 0, y: 0 }}
+                                                end={{ x: 1, y: 1 }}
+                                                style={styles.profileAvatarGradient}
+                                            >
+                                                <Text style={styles.profileAvatarInitials}>
+                                                    {userName
+                                                        .split(' ')
+                                                        .map((n) => n[0])
+                                                        .join('')
+                                                        .slice(0, 2)
+                                                        .toUpperCase()}
+                                                </Text>
+                                            </LinearGradient>
                                         </View>
                                     </View>
-                                    <Text style={styles.profileSubtitle}>Premium user · Since 2025</Text>
+                                    <View style={styles.profileTextBlock}>
+                                        <View style={styles.profileNameRow}>
+                                            <Text style={styles.profileName}>{userName}</Text>
+                                            <View style={styles.profileBadge}>
+                                                <View style={styles.profileBadgeGlow} />
+                                                <MaterialCommunityIcons
+                                                    name="check-decagram"
+                                                    size={16}
+                                                    color="#FFFFFF"
+                                                />
+                                            </View>
+                                        </View>
+                                        <Text style={styles.profileSubtitle}>Premium user · Since 2025</Text>
+                                    </View>
                                 </View>
                             </View>
 
-                            <View style={styles.profileSectionGroup}>
-                                <Text style={styles.profileSectionTitle}>{t.account}</Text>
-                                <TouchableOpacity style={styles.profileRow}>
-                                    <Text style={styles.profileRowLabel}>{t.personalDetails}</Text>
-                                    <MaterialCommunityIcons
-                                        name="chevron-right"
-                                        size={20}
-                                        color={COLORS.textSecondary}
-                                    />
-                                </TouchableOpacity>
-                                <TouchableOpacity style={styles.profileRow}>
-                                    <Text style={styles.profileRowLabel}>{t.security}</Text>
-                                    <MaterialCommunityIcons
-                                        name="chevron-right"
-                                        size={20}
-                                        color={COLORS.textSecondary}
-                                    />
-                                </TouchableOpacity>
-                            </View>
-
-                            <View style={styles.profileSectionGroup}>
-                                <Text style={styles.profileSectionTitle}>{t.notifications}</Text>
-                                <TouchableOpacity style={styles.profileRow}>
-                                    <Text style={styles.profileRowLabel}>{t.pushNotifications}</Text>
-                                    <MaterialCommunityIcons
-                                        name="chevron-right"
-                                        size={20}
-                                        color={COLORS.textSecondary}
-                                    />
-                                </TouchableOpacity>
-                                <TouchableOpacity style={styles.profileRow}>
-                                    <Text style={styles.profileRowLabel}>{t.emailUpdates}</Text>
-                                    <MaterialCommunityIcons
-                                        name="chevron-right"
-                                        size={20}
-                                        color={COLORS.textSecondary}
-                                    />
-                                </TouchableOpacity>
-                            </View>
-
-                            <View style={styles.profileSectionGroup}>
-                                <Text style={styles.profileSectionTitle}>{t.privacy}</Text>
-                                <TouchableOpacity style={styles.profileRow}>
-                                    <Text style={styles.profileRowLabel}>{t.dataPermissions}</Text>
-                                    <MaterialCommunityIcons
-                                        name="chevron-right"
-                                        size={20}
-                                        color={COLORS.textSecondary}
-                                    />
-                                </TouchableOpacity>
-                                <TouchableOpacity style={styles.profileRow}>
-                                    <Text style={styles.profileRowLabel}>{t.connectedApps}</Text>
-                                    <MaterialCommunityIcons
-                                        name="chevron-right"
-                                        size={20}
-                                        color={COLORS.textSecondary}
-                                    />
-                                </TouchableOpacity>
-                            </View>
-
-                            <View style={styles.profileSectionGroup}>
-                                <Text style={styles.profileSectionTitle}>{t.accessibility}</Text>
-                                <View style={styles.profileRow}>
-                                    <Text style={styles.profileRowLabel}>{t.reduceMotion}</Text>
-                                    <Switch
-                                        value={reduceMotion}
-                                        onValueChange={setReduceMotion}
-                                        thumbColor={reduceMotion ? COLORS.primaryBlue : '#FFFFFF'}
-                                                trackColor={{ false: COLORS.border, true: '#BFDBFE' }}
-                                    />
+                            {/* Account Section */}
+                            <View style={styles.profileSectionCard}>
+                                <BlurView intensity={isDarkTheme ? 20 : 15} tint={isDarkTheme ? "dark" : "light"} style={StyleSheet.absoluteFill} />
+                                <LinearGradient
+                                    colors={isDarkTheme 
+                                        ? ['rgba(26, 26, 26, 0.85)', 'rgba(31, 31, 31, 0.9)']
+                                        : ['rgba(255, 255, 255, 0.8)', 'rgba(247, 250, 255, 0.75)']}
+                                    start={{ x: 0, y: 0 }}
+                                    end={{ x: 0, y: 1 }}
+                                    style={StyleSheet.absoluteFill}
+                                />
+                                <View style={styles.profileSectionContent}>
+                                    <Text style={styles.profileSectionTitle}>{t.account}</Text>
+                                    <Pressable style={({ pressed }) => [styles.profileRow, pressed && styles.profileRowPressed]}>
+                                        <View style={styles.profileRowLeft}>
+                                            <View style={styles.profileRowIcon}>
+                                                <MaterialCommunityIcons
+                                                    name="account-outline"
+                                                    size={20}
+                                                    color="#1A73E8"
+                                                />
+                                            </View>
+                                            <Text style={styles.profileRowLabel}>{t.personalDetails}</Text>
+                                        </View>
+                                        <MaterialCommunityIcons
+                                            name="chevron-right"
+                                            size={20}
+                                            color={isDarkTheme ? 'rgba(255, 255, 255, 0.4)' : 'rgba(0, 0, 0, 0.3)'}
+                                        />
+                                    </Pressable>
+                                    <View style={styles.profileRowDivider} />
+                                    <Pressable style={({ pressed }) => [styles.profileRow, pressed && styles.profileRowPressed]}>
+                                        <View style={styles.profileRowLeft}>
+                                            <View style={styles.profileRowIcon}>
+                                                <MaterialCommunityIcons
+                                                    name="shield-outline"
+                                                    size={20}
+                                                    color="#1A73E8"
+                                                />
+                                            </View>
+                                            <Text style={styles.profileRowLabel}>{t.security}</Text>
+                                        </View>
+                                        <MaterialCommunityIcons
+                                            name="chevron-right"
+                                            size={20}
+                                            color={isDarkTheme ? 'rgba(255, 255, 255, 0.4)' : 'rgba(0, 0, 0, 0.3)'}
+                                        />
+                                    </Pressable>
                                 </View>
                             </View>
 
-                            <TouchableOpacity
-                                style={styles.profileLogoutButton}
+                            {/* Subscription Section */}
+                            <View style={styles.profileSectionCard}>
+                                <BlurView intensity={isDarkTheme ? 20 : 15} tint={isDarkTheme ? "dark" : "light"} style={StyleSheet.absoluteFill} />
+                                <LinearGradient
+                                    colors={isDarkTheme 
+                                        ? ['rgba(26, 26, 26, 0.85)', 'rgba(31, 31, 31, 0.9)']
+                                        : ['rgba(255, 255, 255, 0.8)', 'rgba(247, 250, 255, 0.75)']}
+                                    start={{ x: 0, y: 0 }}
+                                    end={{ x: 0, y: 1 }}
+                                    style={StyleSheet.absoluteFill}
+                                />
+                                <View style={styles.profileSectionContent}>
+                                    <Text style={styles.profileSectionTitle}>Subscription</Text>
+                                    <Pressable 
+                                        style={({ pressed }) => [styles.profileRow, pressed && styles.profileRowPressed]}
+                                        onPress={() => setIsSubscriptionModalOpen(true)}
+                                    >
+                                        <View style={styles.profileRowLeft}>
+                                            <View style={styles.profileRowIcon}>
+                                                <MaterialCommunityIcons
+                                                    name="crown-outline"
+                                                    size={20}
+                                                    color="#1A73E8"
+                                                />
+                                            </View>
+                                            <Text style={styles.profileRowLabel}>Manage Subscription</Text>
+                                        </View>
+                                        <MaterialCommunityIcons
+                                            name="chevron-right"
+                                            size={20}
+                                            color={isDarkTheme ? 'rgba(255, 255, 255, 0.4)' : 'rgba(0, 0, 0, 0.3)'}
+                                        />
+                                    </Pressable>
+                                </View>
+                            </View>
+
+                            {/* Notifications Section */}
+                            <View style={styles.profileSectionCard}>
+                                <BlurView intensity={isDarkTheme ? 20 : 15} tint={isDarkTheme ? "dark" : "light"} style={StyleSheet.absoluteFill} />
+                                <LinearGradient
+                                    colors={isDarkTheme 
+                                        ? ['rgba(26, 26, 26, 0.85)', 'rgba(31, 31, 31, 0.9)']
+                                        : ['rgba(255, 255, 255, 0.8)', 'rgba(247, 250, 255, 0.75)']}
+                                    start={{ x: 0, y: 0 }}
+                                    end={{ x: 0, y: 1 }}
+                                    style={StyleSheet.absoluteFill}
+                                />
+                                <View style={styles.profileSectionContent}>
+                                    <Text style={styles.profileSectionTitle}>{t.notifications}</Text>
+                                    <Pressable style={({ pressed }) => [styles.profileRow, pressed && styles.profileRowPressed]}>
+                                        <View style={styles.profileRowLeft}>
+                                            <View style={styles.profileRowIcon}>
+                                                <MaterialCommunityIcons
+                                                    name="bell-outline"
+                                                    size={20}
+                                                    color="#1A73E8"
+                                                />
+                                            </View>
+                                            <Text style={styles.profileRowLabel}>{t.pushNotifications}</Text>
+                                        </View>
+                                        <MaterialCommunityIcons
+                                            name="chevron-right"
+                                            size={20}
+                                            color={isDarkTheme ? 'rgba(255, 255, 255, 0.4)' : 'rgba(0, 0, 0, 0.3)'}
+                                        />
+                                    </Pressable>
+                                    <View style={styles.profileRowDivider} />
+                                    <Pressable style={({ pressed }) => [styles.profileRow, pressed && styles.profileRowPressed]}>
+                                        <View style={styles.profileRowLeft}>
+                                            <View style={styles.profileRowIcon}>
+                                                <MaterialCommunityIcons
+                                                    name="email-outline"
+                                                    size={20}
+                                                    color="#1A73E8"
+                                                />
+                                            </View>
+                                            <Text style={styles.profileRowLabel}>{t.emailUpdates}</Text>
+                                        </View>
+                                        <MaterialCommunityIcons
+                                            name="chevron-right"
+                                            size={20}
+                                            color={isDarkTheme ? 'rgba(255, 255, 255, 0.4)' : 'rgba(0, 0, 0, 0.3)'}
+                                        />
+                                    </Pressable>
+                                </View>
+                            </View>
+
+                            {/* Privacy Section */}
+                            <View style={styles.profileSectionCard}>
+                                <BlurView intensity={isDarkTheme ? 20 : 15} tint={isDarkTheme ? "dark" : "light"} style={StyleSheet.absoluteFill} />
+                                <LinearGradient
+                                    colors={isDarkTheme 
+                                        ? ['rgba(26, 26, 26, 0.85)', 'rgba(31, 31, 31, 0.9)']
+                                        : ['rgba(255, 255, 255, 0.8)', 'rgba(247, 250, 255, 0.75)']}
+                                    start={{ x: 0, y: 0 }}
+                                    end={{ x: 0, y: 1 }}
+                                    style={StyleSheet.absoluteFill}
+                                />
+                                <View style={styles.profileSectionContent}>
+                                    <Text style={styles.profileSectionTitle}>{t.privacy}</Text>
+                                    <Pressable style={({ pressed }) => [styles.profileRow, pressed && styles.profileRowPressed]}>
+                                        <View style={styles.profileRowLeft}>
+                                            <View style={styles.profileRowIcon}>
+                                                <MaterialCommunityIcons
+                                                    name="lock-outline"
+                                                    size={20}
+                                                    color="#1A73E8"
+                                                />
+                                            </View>
+                                            <Text style={styles.profileRowLabel}>{t.dataPermissions}</Text>
+                                        </View>
+                                        <MaterialCommunityIcons
+                                            name="chevron-right"
+                                            size={20}
+                                            color={isDarkTheme ? 'rgba(255, 255, 255, 0.4)' : 'rgba(0, 0, 0, 0.3)'}
+                                        />
+                                    </Pressable>
+                                    <View style={styles.profileRowDivider} />
+                                    <Pressable style={({ pressed }) => [styles.profileRow, pressed && styles.profileRowPressed]}>
+                                        <View style={styles.profileRowLeft}>
+                                            <View style={styles.profileRowIcon}>
+                                                <MaterialCommunityIcons
+                                                    name="apps"
+                                                    size={20}
+                                                    color="#1A73E8"
+                                                />
+                                            </View>
+                                            <Text style={styles.profileRowLabel}>{t.connectedApps}</Text>
+                                        </View>
+                                        <MaterialCommunityIcons
+                                            name="chevron-right"
+                                            size={20}
+                                            color={isDarkTheme ? 'rgba(255, 255, 255, 0.4)' : 'rgba(0, 0, 0, 0.3)'}
+                                        />
+                                    </Pressable>
+                                </View>
+                            </View>
+
+                            {/* Accessibility Section */}
+                            <View style={styles.profileSectionCard}>
+                                <BlurView intensity={isDarkTheme ? 20 : 15} tint={isDarkTheme ? "dark" : "light"} style={StyleSheet.absoluteFill} />
+                                <LinearGradient
+                                    colors={isDarkTheme 
+                                        ? ['rgba(26, 26, 26, 0.85)', 'rgba(31, 31, 31, 0.9)']
+                                        : ['rgba(255, 255, 255, 0.8)', 'rgba(247, 250, 255, 0.75)']}
+                                    start={{ x: 0, y: 0 }}
+                                    end={{ x: 0, y: 1 }}
+                                    style={StyleSheet.absoluteFill}
+                                />
+                                <View style={styles.profileSectionContent}>
+                                    <Text style={styles.profileSectionTitle}>{t.accessibility}</Text>
+                                    <View style={styles.profileRow}>
+                                        <View style={styles.profileRowLeft}>
+                                            <View style={styles.profileRowIcon}>
+                                                <MaterialCommunityIcons
+                                                    name="motion-outline"
+                                                    size={20}
+                                                    color="#1A73E8"
+                                                />
+                                            </View>
+                                            <Text style={styles.profileRowLabel}>{t.reduceMotion}</Text>
+                                        </View>
+                                        <Switch
+                                            value={reduceMotion}
+                                            onValueChange={setReduceMotion}
+                                            thumbColor={reduceMotion ? '#FFFFFF' : '#FFFFFF'}
+                                            trackColor={{ false: isDarkTheme ? 'rgba(255, 255, 255, 0.2)' : COLORS.border, true: '#1A73E8' }}
+                                        />
+                                    </View>
+                                </View>
+                            </View>
+
+                            {/* Logout Button */}
+                            <Pressable
+                                style={({ pressed }) => [
+                                    styles.profileLogoutButton,
+                                    pressed && styles.profileLogoutButtonPressed,
+                                ]}
                                 onPress={() =>
                                     Alert.alert('Log out', 'Are you sure you want to log out?', [
                                         { text: 'Cancel', style: 'cancel' },
-                                        { text: 'Log out', style: 'destructive' },
+                                        { text: 'Log out', style: 'destructive', onPress: onLogout },
                                     ])
                                 }
                             >
-                                <Text style={styles.profileLogoutText}>{t.logout}</Text>
-                            </TouchableOpacity>
+                                <View style={styles.profileLogoutButtonContent}>
+                                    <MaterialCommunityIcons
+                                        name="logout"
+                                        size={20}
+                                        color="#EF4444"
+                                        style={{ marginRight: 8 }}
+                                    />
+                                    <Text style={styles.profileLogoutText}>{t.logout}</Text>
+                                </View>
+                            </Pressable>
                             </View>
                         </ScrollView>
                     </Animated.View>
@@ -2891,14 +3491,22 @@ export function HomeScreen({ userName }: HomeScreenProps) {
                                                     </Animated.View>
                                                     
                                                     {/* Label always visible */}
-                                                    <Text style={[
-                                                        styles.bottomNavLabel,
-                                                        { 
-                                                            color: isActive 
-                                                                ? (isDarkTheme ? '#7C9AFF' : '#1A73E8')
-                                                                : (isDarkTheme ? 'rgba(255, 255, 255, 0.6)' : 'rgba(0, 0, 0, 0.5)')
-                                                        }
-                                                    ]}>
+                                                    <Text 
+                                                        numberOfLines={1}
+                                                        adjustsFontSizeToFit
+                                                        minimumFontScale={0.7}
+                                                        style={[
+                                                            styles.bottomNavLabel,
+                                                            { 
+                                                                color: isActive 
+                                                                    ? (isDarkTheme ? '#7C9AFF' : '#1A73E8')
+                                                                    : (isDarkTheme ? 'rgba(255, 255, 255, 0.6)' : 'rgba(0, 0, 0, 0.5)'),
+                                                                textAlign: 'center',
+                                                                fontSize: isArabic ? 10 : 11,
+                                                                letterSpacing: isArabic ? 0 : 0.2,
+                                                            }
+                                                        ]}
+                                                    >
                                                         {item.label}
                                                     </Text>
                                                 </View>
@@ -2911,6 +3519,190 @@ export function HomeScreen({ userName }: HomeScreenProps) {
                     </View>
                 </View>
             </Animated.View>
+            </GestureDetector>
+
+            {/* Subscription Modal */}
+            {isSubscriptionModalOpen && (
+                <Animated.View style={styles.subscriptionModalOverlay}>
+                    <TouchableOpacity
+                        style={styles.subscriptionBackdrop}
+                        activeOpacity={1}
+                        onPress={() => setIsSubscriptionModalOpen(false)}
+                    />
+                    <Animated.View style={styles.subscriptionModalPanel}>
+                        <BlurView intensity={40} tint={isDarkTheme ? "dark" : "light"} style={styles.subscriptionModalContent}>
+                            <View style={styles.subscriptionHeader}>
+                                <Text style={styles.subscriptionHeaderTitle}>Choose Your Plan</Text>
+                                <TouchableOpacity
+                                    onPress={() => setIsSubscriptionModalOpen(false)}
+                                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                                >
+                                    <MaterialCommunityIcons
+                                        name="close"
+                                        size={24}
+                                        color={COLORS.softGreyText}
+                                    />
+                                </TouchableOpacity>
+                            </View>
+
+                            <ScrollView showsVerticalScrollIndicator={false} style={styles.subscriptionScroll}>
+                                {/* Standard Plan */}
+                                <Pressable
+                                    style={({ pressed }) => [
+                                        styles.subscriptionCard,
+                                        selectedPlan === 'standard' && styles.subscriptionCardSelected,
+                                        pressed && styles.subscriptionCardPressed,
+                                    ]}
+                                    onPress={() => setSelectedPlan('standard')}
+                                >
+                                    <BlurView intensity={20} tint="light" style={StyleSheet.absoluteFill} />
+                                    <View style={styles.subscriptionCardContent}>
+                                        <View style={styles.subscriptionCardHeader}>
+                                            <MaterialCommunityIcons
+                                                name="star-outline"
+                                                size={28}
+                                                color="#6B7280"
+                                            />
+                                            <Text style={styles.subscriptionCardTitle}>Standard</Text>
+                                        </View>
+                                        <Text style={styles.subscriptionCardPrice}>Free</Text>
+                                        <Text style={styles.subscriptionCardDescription}>
+                                            Perfect for casual users
+                                        </Text>
+                                        <View style={styles.subscriptionFeatures}>
+                                            <View style={styles.subscriptionFeatureRow}>
+                                                <MaterialCommunityIcons name="check" size={16} color="#10B981" />
+                                                <Text style={styles.subscriptionFeatureText}>1-2 items per month</Text>
+                                            </View>
+                                            <View style={styles.subscriptionFeatureRow}>
+                                                <MaterialCommunityIcons name="check" size={16} color="#10B981" />
+                                                <Text style={styles.subscriptionFeatureText}>Basic price comparison</Text>
+                                            </View>
+                                        </View>
+                                    </View>
+                                </Pressable>
+
+                                {/* Pro Plan */}
+                                <Pressable
+                                    style={({ pressed }) => [
+                                        styles.subscriptionCard,
+                                        selectedPlan === 'pro' && styles.subscriptionCardSelected,
+                                        pressed && styles.subscriptionCardPressed,
+                                    ]}
+                                    onPress={() => setSelectedPlan('pro')}
+                                >
+                                    <BlurView intensity={20} tint="light" style={StyleSheet.absoluteFill} />
+                                    <LinearGradient
+                                        colors={['rgba(26,115,232,0.1)', 'rgba(66,133,244,0.05)']}
+                                        start={{ x: 0, y: 0 }}
+                                        end={{ x: 1, y: 1 }}
+                                        style={StyleSheet.absoluteFill}
+                                    />
+                                    <View style={styles.subscriptionCardContent}>
+                                        <View style={styles.subscriptionBadge}>
+                                            <Text style={styles.subscriptionBadgeText}>POPULAR</Text>
+                                        </View>
+                                        <View style={styles.subscriptionCardHeader}>
+                                            <MaterialCommunityIcons
+                                                name="crown"
+                                                size={28}
+                                                color="#1A73E8"
+                                            />
+                                            <Text style={styles.subscriptionCardTitle}>Pro</Text>
+                                        </View>
+                                        <Text style={styles.subscriptionCardPrice}>$100<Text style={styles.subscriptionCardPeriod}>/month</Text></Text>
+                                        <Text style={styles.subscriptionCardDescription}>
+                                            For power users
+                                        </Text>
+                                        <View style={styles.subscriptionFeatures}>
+                                            <View style={styles.subscriptionFeatureRow}>
+                                                <MaterialCommunityIcons name="check" size={16} color="#10B981" />
+                                                <Text style={styles.subscriptionFeatureText}>Unlimited scans</Text>
+                                            </View>
+                                            <View style={styles.subscriptionFeatureRow}>
+                                                <MaterialCommunityIcons name="check" size={16} color="#10B981" />
+                                                <Text style={styles.subscriptionFeatureText}>Advanced price alerts</Text>
+                                            </View>
+                                            <View style={styles.subscriptionFeatureRow}>
+                                                <MaterialCommunityIcons name="check" size={16} color="#10B981" />
+                                                <Text style={styles.subscriptionFeatureText}>Priority support</Text>
+                                            </View>
+                                        </View>
+                                    </View>
+                                </Pressable>
+
+                                {/* Premium Plan */}
+                                <Pressable
+                                    style={({ pressed }) => [
+                                        styles.subscriptionCard,
+                                        selectedPlan === 'premium' && styles.subscriptionCardSelected,
+                                        pressed && styles.subscriptionCardPressed,
+                                    ]}
+                                    onPress={() => setSelectedPlan('premium')}
+                                >
+                                    <BlurView intensity={20} tint="light" style={StyleSheet.absoluteFill} />
+                                    <LinearGradient
+                                        colors={['rgba(234,179,8,0.1)', 'rgba(245,158,11,0.05)']}
+                                        start={{ x: 0, y: 0 }}
+                                        end={{ x: 1, y: 1 }}
+                                        style={StyleSheet.absoluteFill}
+                                    />
+                                    <View style={styles.subscriptionCardContent}>
+                                        <View style={[styles.subscriptionBadge, { backgroundColor: '#F59E0B' }]}>
+                                            <Text style={styles.subscriptionBadgeText}>LIFETIME</Text>
+                                        </View>
+                                        <View style={styles.subscriptionCardHeader}>
+                                            <MaterialCommunityIcons
+                                                name="diamond"
+                                                size={28}
+                                                color="#F59E0B"
+                                            />
+                                            <Text style={styles.subscriptionCardTitle}>Premium</Text>
+                                        </View>
+                                        <Text style={styles.subscriptionCardPrice}>$499<Text style={styles.subscriptionCardPeriod}> lifetime</Text></Text>
+                                        <Text style={styles.subscriptionCardDescription}>
+                                            Pay once, own forever
+                                        </Text>
+                                        <View style={styles.subscriptionFeatures}>
+                                            <View style={styles.subscriptionFeatureRow}>
+                                                <MaterialCommunityIcons name="check" size={16} color="#10B981" />
+                                                <Text style={styles.subscriptionFeatureText}>Everything in Pro</Text>
+                                            </View>
+                                            <View style={styles.subscriptionFeatureRow}>
+                                                <MaterialCommunityIcons name="check" size={16} color="#10B981" />
+                                                <Text style={styles.subscriptionFeatureText}>Lifetime updates</Text>
+                                            </View>
+                                            <View style={styles.subscriptionFeatureRow}>
+                                                <MaterialCommunityIcons name="check" size={16} color="#10B981" />
+                                                <Text style={styles.subscriptionFeatureText}>Exclusive features</Text>
+                                            </View>
+                                            <View style={styles.subscriptionFeatureRow}>
+                                                <MaterialCommunityIcons name="check" size={16} color="#10B981" />
+                                                <Text style={styles.subscriptionFeatureText}>VIP support</Text>
+                                            </View>
+                                        </View>
+                                    </View>
+                                </Pressable>
+                            </ScrollView>
+
+                            <View style={styles.subscriptionFooter}>
+                                <TouchableOpacity
+                                    style={styles.subscriptionButton}
+                                    activeOpacity={0.9}
+                                    onPress={() => {
+                                        Alert.alert('Subscription', `You selected the ${selectedPlan} plan!`);
+                                        setIsSubscriptionModalOpen(false);
+                                    }}
+                                >
+                                    <Text style={styles.subscriptionButtonText}>
+                                        {selectedPlan === 'standard' ? 'Continue with Free' : `Subscribe to ${selectedPlan.charAt(0).toUpperCase() + selectedPlan.slice(1)}`}
+                                    </Text>
+                                </TouchableOpacity>
+                            </View>
+                        </BlurView>
+                    </Animated.View>
+                </Animated.View>
+            )}
         </SafeAreaView>
     );
 }
@@ -3065,6 +3857,88 @@ const createStyles = (COLORS: { primaryBlue: string; deepBlue: string; backgroun
     searchInput: {
         fontSize: 15,
         color: COLORS.black,
+    },
+    quickSection: {
+        backgroundColor: COLORS.backgroundSecondary,
+        borderRadius: 18,
+        padding: 14,
+        marginTop: 8,
+        marginBottom: 18,
+        shadowColor: COLORS.black,
+        shadowOpacity: isDarkTheme ? 0.18 : 0.08,
+        shadowRadius: 12,
+        shadowOffset: { width: 0, height: 8 },
+        elevation: 5,
+    },
+    quickSubtitle: {
+        fontSize: 13,
+        color: COLORS.textSecondary,
+        marginTop: 2,
+    },
+    quickCameraButton: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: COLORS.deepBlue,
+        paddingHorizontal: 12,
+        paddingVertical: 8,
+        borderRadius: 12,
+    },
+    quickCameraText: {
+        color: COLORS.backgroundWhite,
+        fontWeight: '600',
+        marginLeft: 6,
+        fontSize: 13,
+    },
+    quickInputRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: COLORS.backgroundWhite,
+        borderRadius: 12,
+        borderWidth: 1,
+        borderColor: COLORS.border,
+        paddingHorizontal: 6,
+        paddingVertical: 8,
+        marginBottom: 10,
+    },
+    quickInput: {
+        flex: 1,
+        color: COLORS.text,
+        paddingHorizontal: 8,
+        fontSize: 14,
+    },
+    quickPrimary: {
+        backgroundColor: COLORS.primaryBlue,
+        borderRadius: 10,
+        paddingHorizontal: 12,
+        paddingVertical: 10,
+        marginLeft: 6,
+    },
+    quickPrimaryText: {
+        color: COLORS.backgroundWhite,
+        fontWeight: '700',
+        fontSize: 13,
+    },
+    quickActionsRow: {
+        flexDirection: 'row',
+        justifyContent: 'flex-start',
+        alignItems: 'center',
+        marginTop: 2,
+    },
+    quickGhost: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: COLORS.backgroundWhite,
+        borderRadius: 10,
+        borderWidth: 1,
+        borderColor: COLORS.border,
+        paddingHorizontal: 12,
+        paddingVertical: 9,
+        marginRight: 10,
+    },
+    quickGhostText: {
+        color: COLORS.text,
+        fontWeight: '600',
+        fontSize: 13,
     },
     actionScroll: {
         marginTop: 24,
@@ -3363,20 +4237,49 @@ const createStyles = (COLORS: { primaryBlue: string; deepBlue: string; backgroun
     },
     aboutContainer: {
         paddingTop: 8,
+        paddingHorizontal: 20,
+    },
+    aboutHeroCard: {
+        borderRadius: 24,
+        overflow: 'hidden',
+        marginBottom: 24,
+        shadowColor: isDarkTheme ? '#000000' : '#1A73E8',
+        shadowOffset: { width: 0, height: 8 },
+        shadowOpacity: isDarkTheme ? 0.4 : 0.15,
+        shadowRadius: 24,
+        elevation: 12,
     },
     aboutHero: {
+        padding: 32,
         alignItems: 'center',
-        marginBottom: 32,
-        paddingTop: 16,
+        position: 'relative',
+    },
+    aboutIconGlow: {
+        position: 'absolute',
+        width: 120,
+        height: 120,
+        borderRadius: 60,
+        backgroundColor: `${COLORS.primaryBlue}20`,
+        top: 16,
+        opacity: 0.6,
     },
     aboutIconCircle: {
         width: 96,
         height: 96,
         borderRadius: 48,
-        backgroundColor: `${COLORS.primaryBlue}15`,
+        overflow: 'hidden',
+        marginBottom: 20,
+        shadowColor: COLORS.primaryBlue,
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.3,
+        shadowRadius: 12,
+        elevation: 8,
+    },
+    aboutIconGradient: {
+        width: '100%',
+        height: '100%',
         justifyContent: 'center',
         alignItems: 'center',
-        marginBottom: 20,
     },
     aboutHeroTitle: {
         fontSize: 32,
@@ -3393,28 +4296,48 @@ const createStyles = (COLORS: { primaryBlue: string; deepBlue: string; backgroun
         paddingHorizontal: 24,
     },
     aboutSection: {
-        marginBottom: 32,
+        marginBottom: 24,
     },
     aboutSectionTitle: {
         fontSize: 22,
         fontWeight: '700',
         color: COLORS.black,
         marginBottom: 16,
+        paddingHorizontal: 4,
     },
-    aboutFeatureCard: {
-        backgroundColor: COLORS.lightGreyBg,
-        borderRadius: 16,
-        padding: 20,
+    aboutAlertCard: {
+        borderRadius: 20,
+        overflow: 'hidden',
+        shadowColor: isDarkTheme ? '#000000' : '#EF4444',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: isDarkTheme ? 0.3 : 0.1,
+        shadowRadius: 16,
+        elevation: 8,
+    },
+    aboutAlertContent: {
+        padding: 24,
         alignItems: 'center',
+        position: 'relative',
     },
-    aboutFeatureIcon: {
-        marginBottom: 12,
+    aboutAlertIconWrapper: {
+        position: 'relative',
+        marginBottom: 16,
+    },
+    aboutAlertIconGlow: {
+        position: 'absolute',
+        width: 60,
+        height: 60,
+        borderRadius: 30,
+        backgroundColor: '#EF4444',
+        opacity: 0.2,
+        top: -6,
+        left: -6,
     },
     aboutFeatureTitle: {
         fontSize: 20,
         fontWeight: '700',
         color: COLORS.black,
-        marginBottom: 8,
+        marginBottom: 12,
         textAlign: 'center',
     },
     aboutFeatureText: {
@@ -3424,17 +4347,42 @@ const createStyles = (COLORS: { primaryBlue: string; deepBlue: string; backgroun
         textAlign: 'center',
     },
     aboutPurposeCard: {
-        backgroundColor: COLORS.lightGreyBg,
-        borderRadius: 16,
-        padding: 24,
+        borderRadius: 20,
+        overflow: 'hidden',
+        shadowColor: isDarkTheme ? '#000000' : '#1A73E8',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: isDarkTheme ? 0.3 : 0.1,
+        shadowRadius: 16,
+        elevation: 8,
+    },
+    aboutPurposeContent: {
+        padding: 28,
+        alignItems: 'center',
+        position: 'relative',
+    },
+    aboutPurposeIconWrapper: {
+        width: 64,
+        height: 64,
+        borderRadius: 32,
+        overflow: 'hidden',
+        marginBottom: 16,
+        shadowColor: COLORS.primaryBlue,
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.3,
+        shadowRadius: 12,
+        elevation: 8,
+    },
+    aboutPurposeIconGradient: {
+        width: '100%',
+        height: '100%',
+        justifyContent: 'center',
         alignItems: 'center',
     },
     aboutPurposeTitle: {
         fontSize: 18,
         fontWeight: '700',
         color: COLORS.black,
-        marginTop: 12,
-        marginBottom: 8,
+        marginBottom: 12,
         textAlign: 'center',
     },
     aboutPurposeText: {
@@ -3444,24 +4392,41 @@ const createStyles = (COLORS: { primaryBlue: string; deepBlue: string; backgroun
         textAlign: 'center',
     },
     aboutStepCard: {
+        borderRadius: 20,
+        overflow: 'hidden',
+        marginBottom: 16,
+        shadowColor: isDarkTheme ? '#000000' : '#1A73E8',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: isDarkTheme ? 0.3 : 0.1,
+        shadowRadius: 16,
+        elevation: 8,
+    },
+    aboutStepContentWrapper: {
         flexDirection: 'row',
         alignItems: 'center',
-        backgroundColor: COLORS.lightGreyBg,
-        borderRadius: 16,
         padding: 20,
-        marginBottom: 12,
+        position: 'relative',
     },
     aboutStepNumber: {
-        width: 40,
-        height: 40,
-        borderRadius: 20,
-        backgroundColor: COLORS.primaryBlue,
+        width: 48,
+        height: 48,
+        borderRadius: 24,
+        overflow: 'hidden',
+        marginRight: 16,
+        shadowColor: COLORS.primaryBlue,
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.3,
+        shadowRadius: 8,
+        elevation: 6,
+    },
+    aboutStepNumberGradient: {
+        width: '100%',
+        height: '100%',
         justifyContent: 'center',
         alignItems: 'center',
-        marginRight: 16,
     },
     aboutStepNumberText: {
-        fontSize: 18,
+        fontSize: 20,
         fontWeight: '700',
         color: COLORS.backgroundWhite,
     },
@@ -3473,12 +4438,20 @@ const createStyles = (COLORS: { primaryBlue: string; deepBlue: string; backgroun
         fontSize: 16,
         fontWeight: '600',
         color: COLORS.black,
-        marginBottom: 4,
+        marginBottom: 6,
     },
     aboutStepText: {
         fontSize: 13,
         color: COLORS.softGreyText,
         lineHeight: 20,
+    },
+    aboutStepIconWrapper: {
+        width: 44,
+        height: 44,
+        borderRadius: 22,
+        backgroundColor: `${COLORS.primaryBlue}15`,
+        justifyContent: 'center',
+        alignItems: 'center',
     },
     aboutFeatureGrid: {
         flexDirection: 'row',
@@ -3487,18 +4460,43 @@ const createStyles = (COLORS: { primaryBlue: string; deepBlue: string; backgroun
     },
     aboutFeatureItem: {
         width: '48%',
-        backgroundColor: COLORS.lightGreyBg,
-        borderRadius: 16,
+        borderRadius: 20,
+        overflow: 'hidden',
+        marginBottom: 12,
+        shadowColor: isDarkTheme ? '#000000' : '#1A73E8',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: isDarkTheme ? 0.3 : 0.1,
+        shadowRadius: 16,
+        elevation: 8,
+    },
+    aboutFeatureItemContent: {
         padding: 20,
         alignItems: 'center',
+        position: 'relative',
+    },
+    aboutFeatureItemIconWrapper: {
+        width: 56,
+        height: 56,
+        borderRadius: 28,
+        overflow: 'hidden',
         marginBottom: 12,
+        shadowColor: '#000000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.2,
+        shadowRadius: 8,
+        elevation: 6,
+    },
+    aboutFeatureItemIconGradient: {
+        width: '100%',
+        height: '100%',
+        justifyContent: 'center',
+        alignItems: 'center',
     },
     aboutFeatureItemTitle: {
         fontSize: 16,
         fontWeight: '600',
         color: COLORS.black,
-        marginTop: 12,
-        marginBottom: 6,
+        marginBottom: 8,
         textAlign: 'center',
     },
     aboutFeatureItemText: {
@@ -3508,20 +4506,52 @@ const createStyles = (COLORS: { primaryBlue: string; deepBlue: string; backgroun
         textAlign: 'center',
     },
     aboutBottomCard: {
-        backgroundColor: `${COLORS.primaryBlue}10`,
-        borderRadius: 20,
-        padding: 32,
-        alignItems: 'center',
+        borderRadius: 24,
+        overflow: 'hidden',
         marginTop: 16,
         marginBottom: 32,
-        borderWidth: 2,
-        borderColor: `${COLORS.primaryBlue}20`,
+        shadowColor: isDarkTheme ? '#000000' : '#10B981',
+        shadowOffset: { width: 0, height: 8 },
+        shadowOpacity: isDarkTheme ? 0.4 : 0.15,
+        shadowRadius: 24,
+        elevation: 12,
+    },
+    aboutBottomContent: {
+        padding: 32,
+        alignItems: 'center',
+        position: 'relative',
+    },
+    aboutBottomIconWrapper: {
+        position: 'relative',
+        marginBottom: 16,
+    },
+    aboutBottomIconGlow: {
+        position: 'absolute',
+        width: 80,
+        height: 80,
+        borderRadius: 40,
+        backgroundColor: '#10B981',
+        opacity: 0.2,
+        top: -8,
+        left: -8,
+    },
+    aboutBottomIconGradient: {
+        width: 64,
+        height: 64,
+        borderRadius: 32,
+        overflow: 'hidden',
+        justifyContent: 'center',
+        alignItems: 'center',
+        shadowColor: '#10B981',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.3,
+        shadowRadius: 12,
+        elevation: 8,
     },
     aboutBottomTitle: {
         fontSize: 20,
         fontWeight: '700',
         color: COLORS.black,
-        marginTop: 16,
         marginBottom: 8,
         textAlign: 'center',
     },
@@ -3709,26 +4739,64 @@ const createStyles = (COLORS: { primaryBlue: string; deepBlue: string; backgroun
         color: COLORS.black,
     },
     profileContainer: {
-        paddingTop: 16,
+        paddingTop: 8,
+    },
+    profileHeaderCard: {
+        marginBottom: 24,
+        borderRadius: 24,
+        overflow: 'hidden',
+        shadowColor: isDarkTheme ? '#000000' : '#1A73E8',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: isDarkTheme ? 0.3 : 0.12,
+        shadowRadius: 20,
+        elevation: 12,
+        borderWidth: isDarkTheme ? 0 : 1,
+        borderColor: isDarkTheme ? 'transparent' : 'rgba(255, 255, 255, 0.3)',
     },
     profileHeader: {
         flexDirection: 'row',
         alignItems: 'center',
-        marginBottom: 24,
+        padding: 24,
+    },
+    profileAvatarWrapper: {
+        position: 'relative',
+        marginRight: 20,
+    },
+    profileAvatarGlow: {
+        position: 'absolute',
+        width: 88,
+        height: 88,
+        borderRadius: 44,
+        backgroundColor: 'rgba(26, 115, 232, 0.15)',
+        shadowColor: '#1A73E8',
+        shadowOffset: { width: 0, height: 0 },
+        shadowOpacity: 0.4,
+        shadowRadius: 16,
+        top: -8,
+        left: -8,
     },
     profileAvatar: {
-        width: 56,
-        height: 56,
-        borderRadius: 28,
-        backgroundColor: COLORS.primaryBlue,
+        width: 72,
+        height: 72,
+        borderRadius: 36,
+        overflow: 'hidden',
+        shadowColor: '#1A73E8',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.3,
+        shadowRadius: 12,
+        elevation: 8,
+    },
+    profileAvatarGradient: {
+        width: '100%',
+        height: '100%',
         justifyContent: 'center',
         alignItems: 'center',
-        marginRight: 16,
     },
     profileAvatarInitials: {
-        fontSize: 20,
+        fontSize: 28,
         fontWeight: '700',
         color: '#FFFFFF',
+        letterSpacing: 1,
     },
     profileTextBlock: {
         flex: 1,
@@ -3736,60 +4804,136 @@ const createStyles = (COLORS: { primaryBlue: string; deepBlue: string; backgroun
     profileNameRow: {
         flexDirection: 'row',
         alignItems: 'center',
-        marginBottom: 4,
+        marginBottom: 6,
     },
     profileName: {
-        fontSize: 20,
+        fontSize: 24,
         fontWeight: '700',
-        color: COLORS.black,
-        marginRight: 8,
+        color: isDarkTheme ? '#FFFFFF' : COLORS.black,
+        marginRight: 10,
+        letterSpacing: -0.5,
     },
     profileBadge: {
-        width: 20,
-        height: 20,
-        borderRadius: 10,
-        backgroundColor: COLORS.primaryBlue,
+        width: 24,
+        height: 24,
+        borderRadius: 12,
+        backgroundColor: '#1A73E8',
         justifyContent: 'center',
         alignItems: 'center',
+        position: 'relative',
+        shadowColor: '#1A73E8',
+        shadowOffset: { width: 0, height: 0 },
+        shadowOpacity: 0.5,
+        shadowRadius: 8,
+    },
+    profileBadgeGlow: {
+        position: 'absolute',
+        width: 32,
+        height: 32,
+        borderRadius: 16,
+        backgroundColor: 'rgba(26, 115, 232, 0.2)',
+        shadowColor: '#1A73E8',
+        shadowOffset: { width: 0, height: 0 },
+        shadowOpacity: 0.6,
+        shadowRadius: 10,
+        top: -4,
+        left: -4,
     },
     profileSubtitle: {
-        fontSize: 13,
-        color: COLORS.softGreyText,
+        fontSize: 14,
+        color: isDarkTheme ? 'rgba(255, 255, 255, 0.6)' : COLORS.softGreyText,
+        fontWeight: '500',
+        letterSpacing: 0.2,
     },
-    profileSectionGroup: {
-        marginTop: 20,
+    profileSectionCard: {
+        marginBottom: 16,
+        borderRadius: 20,
+        overflow: 'hidden',
+        shadowColor: isDarkTheme ? '#000000' : '#1A73E8',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: isDarkTheme ? 0.3 : 0.1,
+        shadowRadius: 16,
+        elevation: 8,
+        borderWidth: isDarkTheme ? 0 : 1,
+        borderColor: isDarkTheme ? 'transparent' : 'rgba(255, 255, 255, 0.3)',
+    },
+    profileSectionContent: {
+        padding: 20,
     },
     profileSectionTitle: {
-        fontSize: 14,
-        fontWeight: '600',
-        color: COLORS.textSecondary,
+        fontSize: 11,
+        fontWeight: '700',
+        color: isDarkTheme ? 'rgba(255, 255, 255, 0.45)' : 'rgba(0, 0, 0, 0.45)',
         textTransform: 'uppercase',
-        letterSpacing: 0.8,
-        marginBottom: 8,
+        letterSpacing: 1.2,
+        marginBottom: 16,
     },
     profileRow: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
-        paddingVertical: 12,
-        borderBottomWidth: 1,
-        borderBottomColor: COLORS.border,
+        paddingVertical: 16,
+        paddingHorizontal: 4,
+        borderRadius: 12,
+        marginBottom: 4,
+    },
+    profileRowPressed: {
+        backgroundColor: isDarkTheme ? 'rgba(255, 255, 255, 0.05)' : 'rgba(26, 115, 232, 0.06)',
+        transform: [{ scale: 0.98 }],
+    },
+    profileRowLeft: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        flex: 1,
+    },
+    profileRowIcon: {
+        width: 40,
+        height: 40,
+        borderRadius: 12,
+        backgroundColor: isDarkTheme ? 'rgba(26, 115, 232, 0.15)' : 'rgba(26, 115, 232, 0.1)',
+        justifyContent: 'center',
+        alignItems: 'center',
+        marginRight: 14,
     },
     profileRowLabel: {
-        fontSize: 15,
-        color: COLORS.text,
+        fontSize: 16,
+        fontWeight: '500',
+        color: isDarkTheme ? '#FFFFFF' : COLORS.text,
+        letterSpacing: -0.2,
+    },
+    profileRowDivider: {
+        height: 1,
+        backgroundColor: isDarkTheme ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.06)',
+        marginLeft: 58,
+        marginVertical: 4,
     },
     profileLogoutButton: {
-        marginTop: 32,
-        borderRadius: 12,
-        paddingVertical: 14,
+        marginTop: 24,
+        marginBottom: 8,
+        borderRadius: 16,
+        overflow: 'hidden',
+        shadowColor: '#EF4444',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.15,
+        shadowRadius: 12,
+        elevation: 6,
+    },
+    profileLogoutButtonPressed: {
+        transform: [{ scale: 0.97 }],
+        opacity: 0.9,
+    },
+    profileLogoutButtonContent: {
+        flexDirection: 'row',
         alignItems: 'center',
-        backgroundColor: '#FEE2E2',
+        justifyContent: 'center',
+        paddingVertical: 16,
+        backgroundColor: isDarkTheme ? 'rgba(239, 68, 68, 0.15)' : '#FEE2E2',
     },
     profileLogoutText: {
-        fontSize: 15,
+        fontSize: 16,
         fontWeight: '600',
-        color: '#DC2626',
+        color: '#EF4444',
+        letterSpacing: 0.2,
     },
     menuOverlay: {
         position: 'absolute',
@@ -4036,13 +5180,15 @@ const createStyles = (COLORS: { primaryBlue: string; deepBlue: string; backgroun
         alignItems: 'center',
         justifyContent: 'center',
         marginTop: 2,
-        minWidth: 50,
-        height: 14,
+        width: '100%',
+        height: 18,
+        paddingHorizontal: 2,
     },
     bottomNavLabel: {
         fontSize: 11,
-        fontWeight: '500',
+        fontWeight: '600',
         letterSpacing: 0.2,
+        width: '100%',
     },
     notificationOverlay: {
         position: 'absolute',
@@ -4327,5 +5473,137 @@ const createStyles = (COLORS: { primaryBlue: string; deepBlue: string; backgroun
         fontSize: 15,
         fontWeight: '600',
         color: COLORS.backgroundWhite,
+    },
+    subscriptionModalOverlay: {
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        zIndex: 30,
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    subscriptionBackdrop: {
+        ...StyleSheet.absoluteFillObject,
+        backgroundColor: 'rgba(0,0,0,0.5)',
+    },
+    subscriptionModalPanel: {
+        width: '90%',
+        maxHeight: '85%',
+        borderRadius: 24,
+        overflow: 'hidden',
+    },
+    subscriptionModalContent: {
+        flex: 1,
+    },
+    subscriptionHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        padding: 20,
+        borderBottomWidth: 1,
+        borderBottomColor: 'rgba(0,0,0,0.05)',
+    },
+    subscriptionHeaderTitle: {
+        fontSize: 22,
+        fontWeight: '700',
+        color: COLORS.black,
+    },
+    subscriptionScroll: {
+        flex: 1,
+        padding: 16,
+    },
+    subscriptionCard: {
+        marginBottom: 16,
+        borderRadius: 16,
+        overflow: 'hidden',
+        borderWidth: 2,
+        borderColor: 'rgba(0,0,0,0.08)',
+    },
+    subscriptionCardSelected: {
+        borderColor: '#1A73E8',
+        borderWidth: 2,
+    },
+    subscriptionCardPressed: {
+        opacity: 0.9,
+    },
+    subscriptionCardContent: {
+        padding: 20,
+    },
+    subscriptionBadge: {
+        position: 'absolute',
+        top: 12,
+        right: 12,
+        backgroundColor: '#1A73E8',
+        paddingHorizontal: 10,
+        paddingVertical: 4,
+        borderRadius: 12,
+    },
+    subscriptionBadgeText: {
+        fontSize: 10,
+        fontWeight: '800',
+        color: '#FFFFFF',
+        letterSpacing: 0.5,
+    },
+    subscriptionCardHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        marginBottom: 12,
+    },
+    subscriptionCardTitle: {
+        fontSize: 24,
+        fontWeight: '700',
+        color: COLORS.black,
+        marginLeft: 12,
+    },
+    subscriptionCardPrice: {
+        fontSize: 32,
+        fontWeight: '800',
+        color: COLORS.primaryBlue,
+        marginBottom: 8,
+    },
+    subscriptionCardPeriod: {
+        fontSize: 16,
+        fontWeight: '400',
+        color: COLORS.softGreyText,
+    },
+    subscriptionCardDescription: {
+        fontSize: 14,
+        color: COLORS.softGreyText,
+        marginBottom: 16,
+    },
+    subscriptionFeatures: {
+        gap: 10,
+    },
+    subscriptionFeatureRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
+    },
+    subscriptionFeatureText: {
+        fontSize: 14,
+        color: COLORS.text,
+    },
+    subscriptionFooter: {
+        padding: 20,
+        borderTopWidth: 1,
+        borderTopColor: 'rgba(0,0,0,0.05)',
+    },
+    subscriptionButton: {
+        backgroundColor: COLORS.primaryBlue,
+        paddingVertical: 16,
+        borderRadius: 12,
+        alignItems: 'center',
+        shadowColor: COLORS.primaryBlue,
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.3,
+        shadowRadius: 8,
+        elevation: 5,
+    },
+    subscriptionButtonText: {
+        fontSize: 16,
+        fontWeight: '700',
+        color: '#FFFFFF',
     },
 });
