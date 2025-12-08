@@ -14,6 +14,7 @@ import {
     Alert,
     Platform,
     Switch,
+    Modal,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -29,6 +30,7 @@ interface HomeScreenProps {
     userName: string;
     onLogout: () => void;
     initialLanguage?: 'en' | 'ar';
+    onNavigateToPayment?: (plan: { name: string; price: string }) => void;
 }
 
 const ACTION_CARD_WIDTH = 300;
@@ -444,7 +446,7 @@ const translations = {
     },
 };
 
-export function HomeScreen({ userName, onLogout, initialLanguage = 'en' }: HomeScreenProps) {
+export function HomeScreen({ userName, onLogout, initialLanguage = 'en', onNavigateToPayment }: HomeScreenProps) {
     const insets = useSafeAreaInsets();
     const screenWidth = Dimensions.get('window').width;
     const drawerWidth = screenWidth * 0.75;
@@ -524,6 +526,13 @@ export function HomeScreen({ userName, onLogout, initialLanguage = 'en' }: HomeS
     const notificationProgress = useRef(new Animated.Value(0)).current;
     const filterProgress = useRef(new Animated.Value(0)).current;
     const scanAlertScroll = useRef(new Animated.Value(0)).current;
+    
+    // Scroll refs for auto-scroll to top
+    const homeScrollRef = useRef<ScrollView>(null);
+    const scanScrollRef = useRef<ScrollView>(null);
+    const aboutScrollRef = useRef<ScrollView>(null);
+    const profileScrollRef = useRef<ScrollView>(null);
+    
     const [welcomeVisible, setWelcomeVisible] = useState(true);
     const [typedWelcome, setTypedWelcome] = useState('');
     const [reduceMotion, setReduceMotion] = useState(false);
@@ -673,6 +682,24 @@ export function HomeScreen({ userName, onLogout, initialLanguage = 'en' }: HomeS
             clearInterval(typingInterval);
         };
     }, [userName, welcomeOpacity]);
+
+    // Auto-scroll to top when switching tabs
+    useEffect(() => {
+        // Small delay to allow page transition animation to start
+        const scrollTimeout = setTimeout(() => {
+            if (activeNav === 'home' && homeScrollRef.current) {
+                homeScrollRef.current.scrollTo({ y: 0, animated: false });
+            } else if (activeNav === 'scan' && scanScrollRef.current) {
+                scanScrollRef.current.scrollTo({ y: 0, animated: false });
+            } else if (activeNav === 'about' && aboutScrollRef.current) {
+                aboutScrollRef.current.scrollTo({ y: 0, animated: false });
+            } else if (activeNav === 'profile' && profileScrollRef.current) {
+                profileScrollRef.current.scrollTo({ y: 0, animated: false });
+            }
+        }, 50);
+
+        return () => clearTimeout(scrollTimeout);
+    }, [activeNav]);
 
     // Animate navigation labels when activeNav changes
     useEffect(() => {
@@ -1000,14 +1027,15 @@ export function HomeScreen({ userName, onLogout, initialLanguage = 'en' }: HomeS
     // Left edge swipe for menu (only on home page)
     const menuEdgeGesture = Gesture.Pan()
         .onUpdate((event) => {
-            // Only trigger if starting from left edge and on home page
-            if (activeNav === 'home' && event.absoluteX < 50 && event.translationX > 0) {
+            // Only trigger if on home page and swiping right (removed left edge restriction)
+            if (activeNav === 'home' && event.translationX > 0) {
                 const progress = Math.min(event.translationX / drawerWidth, 1);
                 menuProgress.setValue(progress);
             }
         })
         .onEnd((event) => {
-            if (activeNav === 'home' && event.absoluteX < 50 && event.translationX > drawerWidth * 0.3) {
+            // Easier trigger: threshold based on swipe distance or velocity
+            if (activeNav === 'home' && (event.translationX > drawerWidth * 0.2 || event.velocityX > 500)) {
                 openMenu();
             } else {
                 Animated.timing(menuProgress, {
@@ -1022,14 +1050,15 @@ export function HomeScreen({ userName, onLogout, initialLanguage = 'en' }: HomeS
     // Vertical swipe from top for notifications
     const notificationPullGesture = Gesture.Pan()
         .onUpdate((event) => {
-            // Only trigger if swiping down from near the top
-            if (event.absoluteY < 100 && event.translationY > 0) {
-                const progress = Math.min(event.translationY / 150, 1);
+            // Trigger if swiping down from the top area (increased area for easier access)
+            // Added check for significant vertical movement vs horizontal to avoid accidental triggers
+            if (event.absoluteY < 300 && event.translationY > 0 && Math.abs(event.translationY) > Math.abs(event.translationX)) {
+                const progress = Math.min(event.translationY / 200, 1);
                 notificationProgress.setValue(progress);
             }
         })
         .onEnd((event) => {
-            if (event.absoluteY < 100 && event.translationY > 80) {
+            if (event.absoluteY < 300 && (event.translationY > 100 || event.velocityY > 500)) {
                 openNotification();
             } else {
                 Animated.timing(notificationProgress, {
@@ -2227,6 +2256,7 @@ export function HomeScreen({ userName, onLogout, initialLanguage = 'en' }: HomeS
                         collapsable={false}
                     >
                         <ScrollView
+                            ref={homeScrollRef}
                             contentContainerStyle={styles.scrollContent}
                             showsVerticalScrollIndicator={false}
                             scrollEventThrottle={16}
@@ -2431,6 +2461,7 @@ export function HomeScreen({ userName, onLogout, initialLanguage = 'en' }: HomeS
                         collapsable={false}
                     >
                         <ScrollView
+                            ref={scanScrollRef}
                             contentContainerStyle={styles.scrollContent}
                             showsVerticalScrollIndicator={false}
                             scrollEventThrottle={16}
@@ -2639,438 +2670,180 @@ export function HomeScreen({ userName, onLogout, initialLanguage = 'en' }: HomeS
                         collapsable={false}
                     >
                         <ScrollView
+                            ref={aboutScrollRef}
                             contentContainerStyle={styles.scrollContent}
                             showsVerticalScrollIndicator={false}
                             scrollEventThrottle={16}
                             onScroll={handleScroll}
                         >
                             <View style={styles.aboutContainer}>
-                                {/* Hero Section - Modern AI Style */}
-                                <View style={styles.aboutHeroCard}>
-                                    <BlurView intensity={isDarkTheme ? 20 : 15} tint={isDarkTheme ? "dark" : "light"} style={StyleSheet.absoluteFill} />
+                                {/* Hero Section - Clean & Minimal */}
+                                <View style={styles.aboutHeroSection}>
                                     <LinearGradient
                                         colors={isDarkTheme 
-                                            ? ['rgba(26, 26, 26, 0.85)', 'rgba(31, 31, 31, 0.9)']
-                                            : ['rgba(255, 255, 255, 0.8)', 'rgba(247, 250, 255, 0.75)']}
+                                            ? ['#0F1419', '#1A1F2E', '#0F1419']
+                                            : ['#FFFFFF', '#F8FAFF', '#FFFFFF']}
+                                        start={{ x: 0, y: 0 }}
+                                        end={{ x: 1, y: 1 }}
+                                        style={styles.aboutHeroGradient}
+                                    />
+                                    <View style={styles.aboutHeroFloatingDot1} />
+                                    <View style={styles.aboutHeroFloatingDot2} />
+                                    <View style={styles.aboutHeroFloatingDot3} />
+                                    <View style={styles.aboutHeroContent}>
+                                        <View style={styles.aboutHeroBadge}>
+                                            <Text style={styles.aboutHeroBadgeText}>AI-POWERED</Text>
+                                        </View>
+                                        <Text style={styles.aboutHeroTitle}>
+                                            Stop{'\n'}Overpaying
+                                        </Text>
+                                        <Text style={styles.aboutHeroDescription}>
+                                            We scan, compare, and find the real best prices across stores. No marketing. No tricks. Just truth.
+                                        </Text>
+                                    </View>
+                                </View>
+
+                                {/* Problem Section - Animated Text */}
+                                <View style={styles.aboutProblemSection}>
+                                    <View style={styles.aboutProblemContent}>
+                                        <Text style={styles.aboutProblemLabel}>THE REALITY</Text>
+                                        <Text style={styles.aboutProblemStatement}>
+                                            Every store claims{' '}
+                                            <Text style={styles.aboutProblemHighlight}>"best price"</Text>
+                                        </Text>
+                                        <Text style={styles.aboutProblemStatement}>
+                                            Most are{' '}
+                                            <Text style={styles.aboutProblemHighlight}>lying</Text>
+                                        </Text>
+                                        <View style={styles.aboutProblemDivider} />
+                                        <Text style={styles.aboutProblemDetail}>
+                                            Prices vary 20-40% between retailers
+                                        </Text>
+                                    </View>
+                                </View>
+
+                                {/* Solution with Visual Cards */}
+                                <View style={styles.aboutSolutionSection}>
+                                    <Text style={styles.aboutSectionHeader}>The Solution</Text>
+                                    
+                                    <View style={styles.aboutSolutionCard}>
+                                        <Image 
+                                            source={{ uri: 'https://images.unsplash.com/photo-1516321497487-e288fb19713f?w=800&q=80' }}
+                                            style={styles.aboutSolutionCardImage}
+                                        />
+                                        <BlurView intensity={30} tint={isDarkTheme ? "dark" : "light"} style={StyleSheet.absoluteFill} />
+                                        <LinearGradient
+                                            colors={['transparent', isDarkTheme ? 'rgba(0,0,0,0.9)' : 'rgba(255,255,255,0.95)']}
+                                            start={{ x: 0, y: 0 }}
+                                            end={{ x: 0, y: 1 }}
+                                            style={StyleSheet.absoluteFill}
+                                        />
+                                        <View style={styles.aboutSolutionCardContent}>
+                                            <View style={styles.aboutSolutionIconBadge}>
+                                                <LinearGradient
+                                                    colors={['#4CAF50', '#66BB6A']}
+                                                    style={styles.aboutSolutionIconGradient}
+                                                >
+                                                    <MaterialCommunityIcons name="cellphone-check" size={32} color="#FFF" />
+                                                </LinearGradient>
+                                            </View>
+                                            <Text style={styles.aboutSolutionCardTitle}>Scan Anything</Text>
+                                            <Text style={styles.aboutSolutionCardText}>
+                                                Barcode, photo, or search by name
+                                            </Text>
+                                        </View>
+                                    </View>
+
+                                    <View style={styles.aboutSolutionCard}>
+                                        <Image 
+                                            source={{ uri: 'https://images.unsplash.com/photo-1677442136019-21780ecad995?w=800&q=80' }}
+                                            style={styles.aboutSolutionCardImage}
+                                        />
+                                        <BlurView intensity={30} tint={isDarkTheme ? "dark" : "light"} style={StyleSheet.absoluteFill} />
+                                        <LinearGradient
+                                            colors={['transparent', isDarkTheme ? 'rgba(0,0,0,0.9)' : 'rgba(255,255,255,0.95)']}
+                                            start={{ x: 0, y: 0 }}
+                                            end={{ x: 0, y: 1 }}
+                                            style={StyleSheet.absoluteFill}
+                                        />
+                                        <View style={styles.aboutSolutionCardContent}>
+                                            <View style={styles.aboutSolutionIconBadge}>
+                                                <LinearGradient
+                                                    colors={['#2196F3', '#42A5F5']}
+                                                    style={styles.aboutSolutionIconGradient}
+                                                >
+                                                    <MaterialCommunityIcons name="brain" size={32} color="#FFF" />
+                                                </LinearGradient>
+                                            </View>
+                                            <Text style={styles.aboutSolutionCardTitle}>AI Comparison</Text>
+                                            <Text style={styles.aboutSolutionCardText}>
+                                                Instant cross-store price analysis
+                                            </Text>
+                                        </View>
+                                    </View>
+
+                                    <View style={styles.aboutSolutionCard}>
+                                        <Image 
+                                            source={{ uri: 'https://images.unsplash.com/photo-1563013544-824ae1b704d3?w=800&q=80' }}
+                                            style={styles.aboutSolutionCardImage}
+                                        />
+                                        <BlurView intensity={30} tint={isDarkTheme ? "dark" : "light"} style={StyleSheet.absoluteFill} />
+                                        <LinearGradient
+                                            colors={['transparent', isDarkTheme ? 'rgba(0,0,0,0.9)' : 'rgba(255,255,255,0.95)']}
+                                            start={{ x: 0, y: 0 }}
+                                            end={{ x: 0, y: 1 }}
+                                            style={StyleSheet.absoluteFill}
+                                        />
+                                        <View style={styles.aboutSolutionCardContent}>
+                                            <View style={styles.aboutSolutionIconBadge}>
+                                                <LinearGradient
+                                                    colors={['#FF9800', '#FFB74D']}
+                                                    style={styles.aboutSolutionIconGradient}
+                                                >
+                                                    <MaterialCommunityIcons name="currency-usd" size={32} color="#FFF" />
+                                                </LinearGradient>
+                                            </View>
+                                            <Text style={styles.aboutSolutionCardTitle}>Save Money</Text>
+                                            <Text style={styles.aboutSolutionCardText}>
+                                                See real savings, buy with confidence
+                                            </Text>
+                                        </View>
+                                    </View>
+                                </View>
+
+                                {/* Impact Stats */}
+                                <View style={styles.aboutStatsSection}>
+                                    <Image 
+                                        source={{ uri: 'https://images.unsplash.com/photo-1460925895917-afdab827c52f?w=800&q=80' }}
+                                        style={styles.aboutStatsImage}
+                                        blurRadius={2}
+                                    />
+                                    <LinearGradient
+                                        colors={isDarkTheme 
+                                            ? ['rgba(0, 0, 0, 0.8)', 'rgba(0, 0, 0, 0.9)']
+                                            : ['rgba(26, 115, 232, 0.9)', 'rgba(66, 165, 245, 0.95)']}
                                         start={{ x: 0, y: 0 }}
                                         end={{ x: 0, y: 1 }}
                                         style={StyleSheet.absoluteFill}
                                     />
-                                    <View style={styles.aboutHero}>
-                                        <View style={styles.aboutIconGlow} />
-                                        <View style={styles.aboutIconCircle}>
-                                            <LinearGradient
-                                                colors={['#1A73E8', '#4285F4', '#5C9EFF']}
-                                                start={{ x: 0, y: 0 }}
-                                                end={{ x: 1, y: 1 }}
-                                                style={styles.aboutIconGradient}
-                                            >
-                                                <MaterialCommunityIcons
-                                                    name="magnify"
-                                                    size={48}
-                                                    color="#FFFFFF"
-                                                />
-                                            </LinearGradient>
+                                    <View style={styles.aboutStatsContent}>
+                                        <View style={styles.aboutStatItem}>
+                                            <Text style={styles.aboutStatNumber}>40%</Text>
+                                            <Text style={styles.aboutStatLabel}>Average Savings</Text>
                                         </View>
-                                        <Text style={styles.aboutHeroTitle}>{t.priceScanner}</Text>
-                                        <Text style={styles.aboutHeroSubtitle}>
-                                            {t.findRealPrices}
-                                        </Text>
-                                    </View>
-                                </View>
-
-                                {/* Main Message Section - Modern Alert Card */}
-                                <View style={styles.aboutSection}>
-                                    <View style={styles.aboutAlertCard}>
-                                        <BlurView intensity={isDarkTheme ? 20 : 15} tint={isDarkTheme ? "dark" : "light"} style={StyleSheet.absoluteFill} />
-                                        <LinearGradient
-                                            colors={isDarkTheme 
-                                                ? ['rgba(239, 68, 68, 0.15)', 'rgba(220, 38, 38, 0.1)']
-                                                : ['rgba(254, 242, 242, 0.9)', 'rgba(255, 255, 255, 0.8)']}
-                                            start={{ x: 0, y: 0 }}
-                                            end={{ x: 0, y: 1 }}
-                                            style={StyleSheet.absoluteFill}
-                                        />
-                                        <View style={styles.aboutAlertContent}>
-                                            <View style={styles.aboutAlertIconWrapper}>
-                                                <View style={styles.aboutAlertIconGlow} />
-                                                <MaterialCommunityIcons
-                                                    name="alert-circle"
-                                                    size={36}
-                                                    color="#EF4444"
-                                                />
-                                            </View>
-                                            <Text style={styles.aboutFeatureTitle}>
-                                                {t.everyoneLying}
-                                            </Text>
-                                            <Text style={styles.aboutFeatureText}>
-                                                {t.everyoneLyingText}
-                                            </Text>
+                                        <View style={styles.aboutStatDivider} />
+                                        <View style={styles.aboutStatItem}>
+                                            <Text style={styles.aboutStatNumber}>15+</Text>
+                                            <Text style={styles.aboutStatLabel}>Stores Scanned</Text>
+                                        </View>
+                                        <View style={styles.aboutStatDivider} />
+                                        <View style={styles.aboutStatItem}>
+                                            <Text style={styles.aboutStatNumber}>Real-time</Text>
+                                            <Text style={styles.aboutStatLabel}>Price Updates</Text>
                                         </View>
                                     </View>
                                 </View>
 
-                                {/* Purpose Section - Modern Card */}
-                                <View style={styles.aboutSection}>
-                                    <Text style={styles.aboutSectionTitle}>{t.ourPurpose}</Text>
-                                    <View style={styles.aboutPurposeCard}>
-                                        <BlurView intensity={isDarkTheme ? 20 : 15} tint={isDarkTheme ? "dark" : "light"} style={StyleSheet.absoluteFill} />
-                                        <LinearGradient
-                                            colors={isDarkTheme 
-                                                ? ['rgba(26, 26, 26, 0.85)', 'rgba(31, 31, 31, 0.9)']
-                                                : ['rgba(255, 255, 255, 0.8)', 'rgba(247, 250, 255, 0.75)']}
-                                            start={{ x: 0, y: 0 }}
-                                            end={{ x: 0, y: 1 }}
-                                            style={StyleSheet.absoluteFill}
-                                        />
-                                        <View style={styles.aboutPurposeContent}>
-                                            <View style={styles.aboutPurposeIconWrapper}>
-                                                <LinearGradient
-                                                    colors={['#1A73E8', '#4285F4']}
-                                                    start={{ x: 0, y: 0 }}
-                                                    end={{ x: 1, y: 1 }}
-                                                    style={styles.aboutPurposeIconGradient}
-                                                >
-                                                    <MaterialCommunityIcons
-                                                        name="target"
-                                                        size={32}
-                                                        color="#FFFFFF"
-                                                    />
-                                                </LinearGradient>
-                                            </View>
-                                            <Text style={styles.aboutPurposeTitle}>
-                                                {t.findActualPrices}
-                                            </Text>
-                                            <Text style={styles.aboutPurposeText}>
-                                                {t.findActualPricesText}
-                                            </Text>
-                                        </View>
-                                    </View>
-                                </View>
-
-                                {/* How It Works - Modern Step Cards */}
-                                <View style={styles.aboutSection}>
-                                    <Text style={styles.aboutSectionTitle}>{t.howItWorks}</Text>
-                                    
-                                    <View style={styles.aboutStepCard}>
-                                        <BlurView intensity={isDarkTheme ? 20 : 15} tint={isDarkTheme ? "dark" : "light"} style={StyleSheet.absoluteFill} />
-                                        <LinearGradient
-                                            colors={isDarkTheme 
-                                                ? ['rgba(26, 26, 26, 0.85)', 'rgba(31, 31, 31, 0.9)']
-                                                : ['rgba(255, 255, 255, 0.8)', 'rgba(247, 250, 255, 0.75)']}
-                                            start={{ x: 0, y: 0 }}
-                                            end={{ x: 0, y: 1 }}
-                                            style={StyleSheet.absoluteFill}
-                                        />
-                                        <View style={styles.aboutStepContentWrapper}>
-                                            <View style={styles.aboutStepNumber}>
-                                                <LinearGradient
-                                                    colors={['#1A73E8', '#4285F4']}
-                                                    start={{ x: 0, y: 0 }}
-                                                    end={{ x: 1, y: 1 }}
-                                                    style={styles.aboutStepNumberGradient}
-                                                >
-                                                    <Text style={styles.aboutStepNumberText}>1</Text>
-                                                </LinearGradient>
-                                            </View>
-                                            <View style={styles.aboutStepContent}>
-                                                <Text style={styles.aboutStepTitle}>{t.step1Title}</Text>
-                                                <Text style={styles.aboutStepText}>
-                                                    {t.step1Text}
-                                                </Text>
-                                            </View>
-                                            <View style={styles.aboutStepIconWrapper}>
-                                                <MaterialCommunityIcons
-                                                    name="barcode-scan"
-                                                    size={28}
-                                                    color={COLORS.primaryBlue}
-                                                />
-                                            </View>
-                                        </View>
-                                    </View>
-
-                                    <View style={styles.aboutStepCard}>
-                                        <BlurView intensity={isDarkTheme ? 20 : 15} tint={isDarkTheme ? "dark" : "light"} style={StyleSheet.absoluteFill} />
-                                        <LinearGradient
-                                            colors={isDarkTheme 
-                                                ? ['rgba(26, 26, 26, 0.85)', 'rgba(31, 31, 31, 0.9)']
-                                                : ['rgba(255, 255, 255, 0.8)', 'rgba(247, 250, 255, 0.75)']}
-                                            start={{ x: 0, y: 0 }}
-                                            end={{ x: 0, y: 1 }}
-                                            style={StyleSheet.absoluteFill}
-                                        />
-                                        <View style={styles.aboutStepContentWrapper}>
-                                            <View style={styles.aboutStepNumber}>
-                                                <LinearGradient
-                                                    colors={['#1A73E8', '#4285F4']}
-                                                    start={{ x: 0, y: 0 }}
-                                                    end={{ x: 1, y: 1 }}
-                                                    style={styles.aboutStepNumberGradient}
-                                                >
-                                                    <Text style={styles.aboutStepNumberText}>2</Text>
-                                                </LinearGradient>
-                                            </View>
-                                            <View style={styles.aboutStepContent}>
-                                                <Text style={styles.aboutStepTitle}>{t.step2Title}</Text>
-                                                <Text style={styles.aboutStepText}>
-                                                    {t.step2Text}
-                                                </Text>
-                                            </View>
-                                            <View style={styles.aboutStepIconWrapper}>
-                                                <MaterialCommunityIcons
-                                                    name="robot"
-                                                    size={28}
-                                                    color={COLORS.primaryBlue}
-                                                />
-                                            </View>
-                                        </View>
-                                    </View>
-
-                                    <View style={styles.aboutStepCard}>
-                                        <BlurView intensity={isDarkTheme ? 20 : 15} tint={isDarkTheme ? "dark" : "light"} style={StyleSheet.absoluteFill} />
-                                        <LinearGradient
-                                            colors={isDarkTheme 
-                                                ? ['rgba(26, 26, 26, 0.85)', 'rgba(31, 31, 31, 0.9)']
-                                                : ['rgba(255, 255, 255, 0.8)', 'rgba(247, 250, 255, 0.75)']}
-                                            start={{ x: 0, y: 0 }}
-                                            end={{ x: 0, y: 1 }}
-                                            style={StyleSheet.absoluteFill}
-                                        />
-                                        <View style={styles.aboutStepContentWrapper}>
-                                            <View style={styles.aboutStepNumber}>
-                                                <LinearGradient
-                                                    colors={['#1A73E8', '#4285F4']}
-                                                    start={{ x: 0, y: 0 }}
-                                                    end={{ x: 1, y: 1 }}
-                                                    style={styles.aboutStepNumberGradient}
-                                                >
-                                                    <Text style={styles.aboutStepNumberText}>3</Text>
-                                                </LinearGradient>
-                                            </View>
-                                            <View style={styles.aboutStepContent}>
-                                                <Text style={styles.aboutStepTitle}>{t.step3Title}</Text>
-                                                <Text style={styles.aboutStepText}>
-                                                    {t.step3Text}
-                                                </Text>
-                                            </View>
-                                            <View style={styles.aboutStepIconWrapper}>
-                                                <MaterialCommunityIcons
-                                                    name="chart-line"
-                                                    size={28}
-                                                    color={COLORS.primaryBlue}
-                                                />
-                                            </View>
-                                        </View>
-                                    </View>
-
-                                    <View style={styles.aboutStepCard}>
-                                        <BlurView intensity={isDarkTheme ? 20 : 15} tint={isDarkTheme ? "dark" : "light"} style={StyleSheet.absoluteFill} />
-                                        <LinearGradient
-                                            colors={isDarkTheme 
-                                                ? ['rgba(26, 26, 26, 0.85)', 'rgba(31, 31, 31, 0.9)']
-                                                : ['rgba(255, 255, 255, 0.8)', 'rgba(247, 250, 255, 0.75)']}
-                                            start={{ x: 0, y: 0 }}
-                                            end={{ x: 0, y: 1 }}
-                                            style={StyleSheet.absoluteFill}
-                                        />
-                                        <View style={styles.aboutStepContentWrapper}>
-                                            <View style={styles.aboutStepNumber}>
-                                                <LinearGradient
-                                                    colors={['#1A73E8', '#4285F4']}
-                                                    start={{ x: 0, y: 0 }}
-                                                    end={{ x: 1, y: 1 }}
-                                                    style={styles.aboutStepNumberGradient}
-                                                >
-                                                    <Text style={styles.aboutStepNumberText}>4</Text>
-                                                </LinearGradient>
-                                            </View>
-                                            <View style={styles.aboutStepContent}>
-                                                <Text style={styles.aboutStepTitle}>{t.step4Title}</Text>
-                                                <Text style={styles.aboutStepText}>
-                                                    {t.step4Text}
-                                                </Text>
-                                            </View>
-                                            <View style={styles.aboutStepIconWrapper}>
-                                                <MaterialCommunityIcons
-                                                    name="wallet"
-                                                    size={28}
-                                                    color={COLORS.primaryBlue}
-                                                />
-                                            </View>
-                                        </View>
-                                    </View>
-                                </View>
-
-                                {/* Key Features - Modern Grid */}
-                                <View style={styles.aboutSection}>
-                                    <Text style={styles.aboutSectionTitle}>{t.whyPriceScanner}</Text>
-                                    
-                                    <View style={styles.aboutFeatureGrid}>
-                                        <View style={styles.aboutFeatureItem}>
-                                            <BlurView intensity={isDarkTheme ? 20 : 15} tint={isDarkTheme ? "dark" : "light"} style={StyleSheet.absoluteFill} />
-                                            <LinearGradient
-                                                colors={isDarkTheme 
-                                                    ? ['rgba(26, 26, 26, 0.85)', 'rgba(31, 31, 31, 0.9)']
-                                                    : ['rgba(255, 255, 255, 0.8)', 'rgba(247, 250, 255, 0.75)']}
-                                                start={{ x: 0, y: 0 }}
-                                                end={{ x: 0, y: 1 }}
-                                                style={StyleSheet.absoluteFill}
-                                            />
-                                            <View style={styles.aboutFeatureItemContent}>
-                                                <View style={styles.aboutFeatureItemIconWrapper}>
-                                                    <LinearGradient
-                                                        colors={['#10B981', '#34D399']}
-                                                        start={{ x: 0, y: 0 }}
-                                                        end={{ x: 1, y: 1 }}
-                                                        style={styles.aboutFeatureItemIconGradient}
-                                                    >
-                                                        <MaterialCommunityIcons
-                                                            name="shield-check"
-                                                            size={24}
-                                                            color="#FFFFFF"
-                                                        />
-                                                    </LinearGradient>
-                                                </View>
-                                                <Text style={styles.aboutFeatureItemTitle}>{t.noLies}</Text>
-                                                <Text style={styles.aboutFeatureItemText}>
-                                                    {t.noLiesText}
-                                                </Text>
-                                            </View>
-                                        </View>
-
-                                        <View style={styles.aboutFeatureItem}>
-                                            <BlurView intensity={isDarkTheme ? 20 : 15} tint={isDarkTheme ? "dark" : "light"} style={StyleSheet.absoluteFill} />
-                                            <LinearGradient
-                                                colors={isDarkTheme 
-                                                    ? ['rgba(26, 26, 26, 0.85)', 'rgba(31, 31, 31, 0.9)']
-                                                    : ['rgba(255, 255, 255, 0.8)', 'rgba(247, 250, 255, 0.75)']}
-                                                start={{ x: 0, y: 0 }}
-                                                end={{ x: 0, y: 1 }}
-                                                style={StyleSheet.absoluteFill}
-                                            />
-                                            <View style={styles.aboutFeatureItemContent}>
-                                                <View style={styles.aboutFeatureItemIconWrapper}>
-                                                    <LinearGradient
-                                                        colors={['#1A73E8', '#4285F4']}
-                                                        start={{ x: 0, y: 0 }}
-                                                        end={{ x: 1, y: 1 }}
-                                                        style={styles.aboutFeatureItemIconGradient}
-                                                    >
-                                                        <MaterialCommunityIcons
-                                                            name="store"
-                                                            size={24}
-                                                            color="#FFFFFF"
-                                                        />
-                                                    </LinearGradient>
-                                                </View>
-                                                <Text style={styles.aboutFeatureItemTitle}>{t.multipleStores}</Text>
-                                                <Text style={styles.aboutFeatureItemText}>
-                                                    {t.multipleStoresText}
-                                                </Text>
-                                            </View>
-                                        </View>
-
-                                        <View style={styles.aboutFeatureItem}>
-                                            <BlurView intensity={isDarkTheme ? 20 : 15} tint={isDarkTheme ? "dark" : "light"} style={StyleSheet.absoluteFill} />
-                                            <LinearGradient
-                                                colors={isDarkTheme 
-                                                    ? ['rgba(26, 26, 26, 0.85)', 'rgba(31, 31, 31, 0.9)']
-                                                    : ['rgba(255, 255, 255, 0.8)', 'rgba(247, 250, 255, 0.75)']}
-                                                start={{ x: 0, y: 0 }}
-                                                end={{ x: 0, y: 1 }}
-                                                style={StyleSheet.absoluteFill}
-                                            />
-                                            <View style={styles.aboutFeatureItemContent}>
-                                                <View style={styles.aboutFeatureItemIconWrapper}>
-                                                    <LinearGradient
-                                                        colors={['#F59E0B', '#FBBF24']}
-                                                        start={{ x: 0, y: 0 }}
-                                                        end={{ x: 1, y: 1 }}
-                                                        style={styles.aboutFeatureItemIconGradient}
-                                                    >
-                                                        <MaterialCommunityIcons
-                                                            name="lightning-bolt"
-                                                            size={24}
-                                                            color="#FFFFFF"
-                                                        />
-                                                    </LinearGradient>
-                                                </View>
-                                                <Text style={styles.aboutFeatureItemTitle}>{t.realTime}</Text>
-                                                <Text style={styles.aboutFeatureItemText}>
-                                                    {t.realTimeText}
-                                                </Text>
-                                            </View>
-                                        </View>
-
-                                        <View style={styles.aboutFeatureItem}>
-                                            <BlurView intensity={isDarkTheme ? 20 : 15} tint={isDarkTheme ? "dark" : "light"} style={StyleSheet.absoluteFill} />
-                                            <LinearGradient
-                                                colors={isDarkTheme 
-                                                    ? ['rgba(26, 26, 26, 0.85)', 'rgba(31, 31, 31, 0.9)']
-                                                    : ['rgba(255, 255, 255, 0.8)', 'rgba(247, 250, 255, 0.75)']}
-                                                start={{ x: 0, y: 0 }}
-                                                end={{ x: 0, y: 1 }}
-                                                style={StyleSheet.absoluteFill}
-                                            />
-                                            <View style={styles.aboutFeatureItemContent}>
-                                                <View style={styles.aboutFeatureItemIconWrapper}>
-                                                    <LinearGradient
-                                                        colors={['#8B5CF6', '#A78BFA']}
-                                                        start={{ x: 0, y: 0 }}
-                                                        end={{ x: 1, y: 1 }}
-                                                        style={styles.aboutFeatureItemIconGradient}
-                                                    >
-                                                        <MaterialCommunityIcons
-                                                            name="brain"
-                                                            size={24}
-                                                            color="#FFFFFF"
-                                                        />
-                                                    </LinearGradient>
-                                                </View>
-                                                <Text style={styles.aboutFeatureItemTitle}>{t.aiPowered}</Text>
-                                                <Text style={styles.aboutFeatureItemText}>
-                                                    {t.aiPoweredText}
-                                                </Text>
-                                            </View>
-                                        </View>
-                                    </View>
-                                </View>
-
-                                {/* Bottom Message - Modern CTA Card */}
-                                <View style={styles.aboutBottomCard}>
-                                    <BlurView intensity={isDarkTheme ? 20 : 15} tint={isDarkTheme ? "dark" : "light"} style={StyleSheet.absoluteFill} />
-                                    <LinearGradient
-                                        colors={isDarkTheme 
-                                            ? ['rgba(16, 185, 129, 0.2)', 'rgba(5, 150, 105, 0.15)']
-                                            : ['rgba(236, 253, 245, 0.9)', 'rgba(209, 250, 229, 0.8)']}
-                                        start={{ x: 0, y: 0 }}
-                                        end={{ x: 0, y: 1 }}
-                                        style={StyleSheet.absoluteFill}
-                                    />
-                                    <View style={styles.aboutBottomContent}>
-                                        <View style={styles.aboutBottomIconWrapper}>
-                                            <View style={styles.aboutBottomIconGlow} />
-                                            <LinearGradient
-                                                colors={['#10B981', '#34D399']}
-                                                start={{ x: 0, y: 0 }}
-                                                end={{ x: 1, y: 1 }}
-                                                style={styles.aboutBottomIconGradient}
-                                            >
-                                                <MaterialCommunityIcons
-                                                    name="check-circle"
-                                                    size={36}
-                                                    color="#FFFFFF"
-                                                />
-                                            </LinearGradient>
-                                        </View>
-                                        <Text style={styles.aboutBottomTitle}>
-                                            {t.bestPriceExists}
-                                        </Text>
-                                        <Text style={styles.aboutBottomText}>
-                                            {t.stopBelieving}
-                                        </Text>
-                                    </View>
-                                </View>
                             </View>
                         </ScrollView>
                     </Animated.View>
@@ -3088,6 +2861,7 @@ export function HomeScreen({ userName, onLogout, initialLanguage = 'en' }: HomeS
                         collapsable={false}
                     >
                         <ScrollView
+                            ref={profileScrollRef}
                             contentContainerStyle={styles.scrollContent}
                             showsVerticalScrollIndicator={false}
                             scrollEventThrottle={16}
@@ -3521,16 +3295,22 @@ export function HomeScreen({ userName, onLogout, initialLanguage = 'en' }: HomeS
             </Animated.View>
             </GestureDetector>
 
-            {/* Subscription Modal */}
-            {isSubscriptionModalOpen && (
-                <Animated.View style={styles.subscriptionModalOverlay}>
+            {/* Subscription Modal - Native Implementation */}
+            <Modal
+                animationType="fade"
+                transparent={true}
+                visible={isSubscriptionModalOpen}
+                onRequestClose={() => setIsSubscriptionModalOpen(false)}
+                statusBarTranslucent={true}
+            >
+                <View style={styles.subscriptionModalOverlay}>
                     <TouchableOpacity
                         style={styles.subscriptionBackdrop}
                         activeOpacity={1}
                         onPress={() => setIsSubscriptionModalOpen(false)}
                     />
-                    <Animated.View style={styles.subscriptionModalPanel}>
-                        <BlurView intensity={40} tint={isDarkTheme ? "dark" : "light"} style={styles.subscriptionModalContent}>
+                    <View style={styles.subscriptionModalPanel}>
+                        <View style={styles.subscriptionModalContent}>
                             <View style={styles.subscriptionHeader}>
                                 <Text style={styles.subscriptionHeaderTitle}>Choose Your Plan</Text>
                                 <TouchableOpacity
@@ -3555,7 +3335,6 @@ export function HomeScreen({ userName, onLogout, initialLanguage = 'en' }: HomeS
                                     ]}
                                     onPress={() => setSelectedPlan('standard')}
                                 >
-                                    <BlurView intensity={20} tint="light" style={StyleSheet.absoluteFill} />
                                     <View style={styles.subscriptionCardContent}>
                                         <View style={styles.subscriptionCardHeader}>
                                             <MaterialCommunityIcons
@@ -3591,7 +3370,6 @@ export function HomeScreen({ userName, onLogout, initialLanguage = 'en' }: HomeS
                                     ]}
                                     onPress={() => setSelectedPlan('pro')}
                                 >
-                                    <BlurView intensity={20} tint="light" style={StyleSheet.absoluteFill} />
                                     <LinearGradient
                                         colors={['rgba(26,115,232,0.1)', 'rgba(66,133,244,0.05)']}
                                         start={{ x: 0, y: 0 }}
@@ -3640,7 +3418,6 @@ export function HomeScreen({ userName, onLogout, initialLanguage = 'en' }: HomeS
                                     ]}
                                     onPress={() => setSelectedPlan('premium')}
                                 >
-                                    <BlurView intensity={20} tint="light" style={StyleSheet.absoluteFill} />
                                     <LinearGradient
                                         colors={['rgba(234,179,8,0.1)', 'rgba(245,158,11,0.05)']}
                                         start={{ x: 0, y: 0 }}
@@ -3690,8 +3467,25 @@ export function HomeScreen({ userName, onLogout, initialLanguage = 'en' }: HomeS
                                     style={styles.subscriptionButton}
                                     activeOpacity={0.9}
                                     onPress={() => {
-                                        Alert.alert('Subscription', `You selected the ${selectedPlan} plan!`);
-                                        setIsSubscriptionModalOpen(false);
+                                        if (selectedPlan === 'standard') {
+                                            setIsSubscriptionModalOpen(false);
+                                            Alert.alert('Success', 'You are now on the Standard plan');
+                                        } else {
+                                            const planName = selectedPlan.charAt(0).toUpperCase() + selectedPlan.slice(1);
+                                            const price = selectedPlan === 'pro' ? '$100/month' : '$499 Lifetime';
+                                            
+                                            if (onNavigateToPayment) {
+                                                // Close modal first
+                                                setIsSubscriptionModalOpen(false);
+                                                // Navigate immediately after
+                                                requestAnimationFrame(() => {
+                                                    onNavigateToPayment({ name: planName, price });
+                                                });
+                                            } else {
+                                                setIsSubscriptionModalOpen(false);
+                                                Alert.alert('Debug', 'Navigation prop missing');
+                                            }
+                                        }
                                     }}
                                 >
                                     <Text style={styles.subscriptionButtonText}>
@@ -3699,10 +3493,10 @@ export function HomeScreen({ userName, onLogout, initialLanguage = 'en' }: HomeS
                                     </Text>
                                 </TouchableOpacity>
                             </View>
-                        </BlurView>
-                    </Animated.View>
-                </Animated.View>
-            )}
+                        </View>
+                    </View>
+                </View>
+            </Modal>
         </SafeAreaView>
     );
 }
@@ -3805,7 +3599,7 @@ const createStyles = (COLORS: { primaryBlue: string; deepBlue: string; backgroun
     scrollContent: {
         paddingHorizontal: 16,
         paddingTop: Platform.OS === 'ios' ? 100 : 96, // Account for top bar (68px + margins)
-        paddingBottom: 72,
+        paddingBottom: 120, // Increased padding to prevent content hiding behind bottom nav
         backgroundColor: COLORS.backgroundWhite,
     },
     welcomeCombined: {
@@ -4236,330 +4030,250 @@ const createStyles = (COLORS: { primaryBlue: string; deepBlue: string; backgroun
         letterSpacing: 0.5,
     },
     aboutContainer: {
-        paddingTop: 8,
-        paddingHorizontal: 20,
+        paddingTop: 0,
+        marginTop: -40, // Move content up by ~1cm
     },
-    aboutHeroCard: {
-        borderRadius: 24,
-        overflow: 'hidden',
-        marginBottom: 24,
-        shadowColor: isDarkTheme ? '#000000' : '#1A73E8',
-        shadowOffset: { width: 0, height: 8 },
-        shadowOpacity: isDarkTheme ? 0.4 : 0.15,
-        shadowRadius: 24,
-        elevation: 12,
-    },
-    aboutHero: {
-        padding: 32,
-        alignItems: 'center',
+    // Hero Section - Clean Minimal Design
+    aboutHeroSection: {
+        minHeight: 380,
         position: 'relative',
+        overflow: 'hidden',
+        marginBottom: 32,
+        paddingHorizontal: 24,
+        paddingTop: 60,
+        paddingBottom: 50,
     },
-    aboutIconGlow: {
+    aboutHeroGradient: {
+        position: 'absolute',
+        width: '100%',
+        height: '100%',
+        top: 0,
+        left: 0,
+    },
+    aboutHeroFloatingDot1: {
         position: 'absolute',
         width: 120,
         height: 120,
         borderRadius: 60,
-        backgroundColor: `${COLORS.primaryBlue}20`,
-        top: 16,
-        opacity: 0.6,
+        backgroundColor: isDarkTheme ? 'rgba(66, 165, 245, 0.08)' : 'rgba(26, 115, 232, 0.06)',
+        top: 40,
+        right: -30,
     },
-    aboutIconCircle: {
-        width: 96,
-        height: 96,
-        borderRadius: 48,
-        overflow: 'hidden',
-        marginBottom: 20,
-        shadowColor: COLORS.primaryBlue,
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.3,
-        shadowRadius: 12,
-        elevation: 8,
-    },
-    aboutIconGradient: {
-        width: '100%',
-        height: '100%',
-        justifyContent: 'center',
-        alignItems: 'center',
-    },
-    aboutHeroTitle: {
-        fontSize: 32,
-        fontWeight: '700',
-        color: COLORS.black,
-        marginBottom: 8,
-        textAlign: 'center',
-    },
-    aboutHeroSubtitle: {
-        fontSize: 16,
-        color: COLORS.softGreyText,
-        textAlign: 'center',
-        lineHeight: 24,
-        paddingHorizontal: 24,
-    },
-    aboutSection: {
-        marginBottom: 24,
-    },
-    aboutSectionTitle: {
-        fontSize: 22,
-        fontWeight: '700',
-        color: COLORS.black,
-        marginBottom: 16,
-        paddingHorizontal: 4,
-    },
-    aboutAlertCard: {
-        borderRadius: 20,
-        overflow: 'hidden',
-        shadowColor: isDarkTheme ? '#000000' : '#EF4444',
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: isDarkTheme ? 0.3 : 0.1,
-        shadowRadius: 16,
-        elevation: 8,
-    },
-    aboutAlertContent: {
-        padding: 24,
-        alignItems: 'center',
-        position: 'relative',
-    },
-    aboutAlertIconWrapper: {
-        position: 'relative',
-        marginBottom: 16,
-    },
-    aboutAlertIconGlow: {
-        position: 'absolute',
-        width: 60,
-        height: 60,
-        borderRadius: 30,
-        backgroundColor: '#EF4444',
-        opacity: 0.2,
-        top: -6,
-        left: -6,
-    },
-    aboutFeatureTitle: {
-        fontSize: 20,
-        fontWeight: '700',
-        color: COLORS.black,
-        marginBottom: 12,
-        textAlign: 'center',
-    },
-    aboutFeatureText: {
-        fontSize: 14,
-        color: COLORS.softGreyText,
-        lineHeight: 22,
-        textAlign: 'center',
-    },
-    aboutPurposeCard: {
-        borderRadius: 20,
-        overflow: 'hidden',
-        shadowColor: isDarkTheme ? '#000000' : '#1A73E8',
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: isDarkTheme ? 0.3 : 0.1,
-        shadowRadius: 16,
-        elevation: 8,
-    },
-    aboutPurposeContent: {
-        padding: 28,
-        alignItems: 'center',
-        position: 'relative',
-    },
-    aboutPurposeIconWrapper: {
-        width: 64,
-        height: 64,
-        borderRadius: 32,
-        overflow: 'hidden',
-        marginBottom: 16,
-        shadowColor: COLORS.primaryBlue,
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.3,
-        shadowRadius: 12,
-        elevation: 8,
-    },
-    aboutPurposeIconGradient: {
-        width: '100%',
-        height: '100%',
-        justifyContent: 'center',
-        alignItems: 'center',
-    },
-    aboutPurposeTitle: {
-        fontSize: 18,
-        fontWeight: '700',
-        color: COLORS.black,
-        marginBottom: 12,
-        textAlign: 'center',
-    },
-    aboutPurposeText: {
-        fontSize: 14,
-        color: COLORS.softGreyText,
-        lineHeight: 22,
-        textAlign: 'center',
-    },
-    aboutStepCard: {
-        borderRadius: 20,
-        overflow: 'hidden',
-        marginBottom: 16,
-        shadowColor: isDarkTheme ? '#000000' : '#1A73E8',
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: isDarkTheme ? 0.3 : 0.1,
-        shadowRadius: 16,
-        elevation: 8,
-    },
-    aboutStepContentWrapper: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        padding: 20,
-        position: 'relative',
-    },
-    aboutStepNumber: {
-        width: 48,
-        height: 48,
-        borderRadius: 24,
-        overflow: 'hidden',
-        marginRight: 16,
-        shadowColor: COLORS.primaryBlue,
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.3,
-        shadowRadius: 8,
-        elevation: 6,
-    },
-    aboutStepNumberGradient: {
-        width: '100%',
-        height: '100%',
-        justifyContent: 'center',
-        alignItems: 'center',
-    },
-    aboutStepNumberText: {
-        fontSize: 20,
-        fontWeight: '700',
-        color: COLORS.backgroundWhite,
-    },
-    aboutStepContent: {
-        flex: 1,
-        marginRight: 12,
-    },
-    aboutStepTitle: {
-        fontSize: 16,
-        fontWeight: '600',
-        color: COLORS.black,
-        marginBottom: 6,
-    },
-    aboutStepText: {
-        fontSize: 13,
-        color: COLORS.softGreyText,
-        lineHeight: 20,
-    },
-    aboutStepIconWrapper: {
-        width: 44,
-        height: 44,
-        borderRadius: 22,
-        backgroundColor: `${COLORS.primaryBlue}15`,
-        justifyContent: 'center',
-        alignItems: 'center',
-    },
-    aboutFeatureGrid: {
-        flexDirection: 'row',
-        flexWrap: 'wrap',
-        gap: 12,
-    },
-    aboutFeatureItem: {
-        width: '48%',
-        borderRadius: 20,
-        overflow: 'hidden',
-        marginBottom: 12,
-        shadowColor: isDarkTheme ? '#000000' : '#1A73E8',
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: isDarkTheme ? 0.3 : 0.1,
-        shadowRadius: 16,
-        elevation: 8,
-    },
-    aboutFeatureItemContent: {
-        padding: 20,
-        alignItems: 'center',
-        position: 'relative',
-    },
-    aboutFeatureItemIconWrapper: {
-        width: 56,
-        height: 56,
-        borderRadius: 28,
-        overflow: 'hidden',
-        marginBottom: 12,
-        shadowColor: '#000000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.2,
-        shadowRadius: 8,
-        elevation: 6,
-    },
-    aboutFeatureItemIconGradient: {
-        width: '100%',
-        height: '100%',
-        justifyContent: 'center',
-        alignItems: 'center',
-    },
-    aboutFeatureItemTitle: {
-        fontSize: 16,
-        fontWeight: '600',
-        color: COLORS.black,
-        marginBottom: 8,
-        textAlign: 'center',
-    },
-    aboutFeatureItemText: {
-        fontSize: 12,
-        color: COLORS.softGreyText,
-        lineHeight: 18,
-        textAlign: 'center',
-    },
-    aboutBottomCard: {
-        borderRadius: 24,
-        overflow: 'hidden',
-        marginTop: 16,
-        marginBottom: 32,
-        shadowColor: isDarkTheme ? '#000000' : '#10B981',
-        shadowOffset: { width: 0, height: 8 },
-        shadowOpacity: isDarkTheme ? 0.4 : 0.15,
-        shadowRadius: 24,
-        elevation: 12,
-    },
-    aboutBottomContent: {
-        padding: 32,
-        alignItems: 'center',
-        position: 'relative',
-    },
-    aboutBottomIconWrapper: {
-        position: 'relative',
-        marginBottom: 16,
-    },
-    aboutBottomIconGlow: {
+    aboutHeroFloatingDot2: {
         position: 'absolute',
         width: 80,
         height: 80,
         borderRadius: 40,
-        backgroundColor: '#10B981',
-        opacity: 0.2,
-        top: -8,
-        left: -8,
+        backgroundColor: isDarkTheme ? 'rgba(66, 165, 245, 0.12)' : 'rgba(26, 115, 232, 0.08)',
+        bottom: 60,
+        left: -20,
     },
-    aboutBottomIconGradient: {
+    aboutHeroFloatingDot3: {
+        position: 'absolute',
+        width: 60,
+        height: 60,
+        borderRadius: 30,
+        backgroundColor: isDarkTheme ? 'rgba(66, 165, 245, 0.1)' : 'rgba(26, 115, 232, 0.1)',
+        top: 140,
+        left: 50,
+    },
+    aboutHeroContent: {
+        alignItems: 'center',
+        justifyContent: 'center',
+        paddingHorizontal: 0,
+    },
+    aboutHeroBadge: {
+        paddingHorizontal: 16,
+        paddingVertical: 8,
+        borderRadius: 20,
+        backgroundColor: isDarkTheme ? 'rgba(66, 165, 245, 0.15)' : 'rgba(26, 115, 232, 0.1)',
+        borderWidth: 1,
+        borderColor: isDarkTheme ? 'rgba(66, 165, 245, 0.3)' : 'rgba(26, 115, 232, 0.2)',
+        marginBottom: 28,
+    },
+    aboutHeroBadgeText: {
+        fontSize: 11,
+        fontWeight: '700',
+        color: isDarkTheme ? '#42A5F5' : '#1A73E8',
+        letterSpacing: 1.2,
+    },
+    aboutHeroTitle: {
+        fontSize: 54,
+        fontWeight: '900',
+        color: isDarkTheme ? '#FFFFFF' : COLORS.black,
+        textAlign: 'center',
+        letterSpacing: -2,
+        lineHeight: 60,
+        marginBottom: 20,
+        width: '100%',
+    },
+    aboutHeroDescription: {
+        fontSize: 17,
+        fontWeight: '500',
+        color: isDarkTheme ? 'rgba(255, 255, 255, 0.7)' : COLORS.textSecondary,
+        textAlign: 'center',
+        lineHeight: 26,
+        paddingHorizontal: 8,
+        maxWidth: 340,
+    },
+    // Problem Section - Clean Typography Focus
+    aboutProblemSection: {
+        marginHorizontal: 24,
+        marginBottom: 32,
+        paddingVertical: 32,
+    },
+    aboutProblemContent: {
+        alignItems: 'flex-start',
+    },
+    aboutProblemLabel: {
+        fontSize: 11,
+        fontWeight: '800',
+        color: isDarkTheme ? 'rgba(255, 255, 255, 0.5)' : 'rgba(0, 0, 0, 0.4)',
+        letterSpacing: 1.5,
+        marginBottom: 16,
+    },
+    aboutProblemStatement: {
+        fontSize: 32,
+        fontWeight: '800',
+        color: isDarkTheme ? '#FFFFFF' : COLORS.black,
+        letterSpacing: -1,
+        lineHeight: 40,
+        marginBottom: 4,
+    },
+    aboutProblemHighlight: {
+        color: '#1A73E8',
+        fontWeight: '900',
+    },
+    aboutProblemDivider: {
+        width: 60,
+        height: 4,
+        backgroundColor: '#1A73E8',
+        borderRadius: 2,
+        marginVertical: 20,
+        opacity: 0.8,
+    },
+    aboutProblemDetail: {
+        fontSize: 16,
+        fontWeight: '500',
+        color: isDarkTheme ? 'rgba(255, 255, 255, 0.65)' : COLORS.softGreyText,
+        lineHeight: 24,
+    },
+    // Solution Section
+    aboutSolutionSection: {
+        paddingHorizontal: 20,
+        marginBottom: 20,
+    },
+    aboutSectionHeader: {
+        fontSize: 28,
+        fontWeight: '800',
+        color: COLORS.black,
+        marginBottom: 20,
+        textAlign: 'center',
+    },
+    aboutSolutionCard: {
+        height: 200,
+        borderRadius: 24,
+        overflow: 'hidden',
+        marginBottom: 16,
+        position: 'relative',
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 6 },
+        shadowOpacity: 0.2,
+        shadowRadius: 12,
+        elevation: 10,
+    },
+    aboutSolutionCardImage: {
+        width: '100%',
+        height: '100%',
+        position: 'absolute',
+    },
+    aboutSolutionCardContent: {
+        flex: 1,
+        justifyContent: 'flex-end',
+        padding: 24,
+    },
+    aboutSolutionIconBadge: {
         width: 64,
         height: 64,
         borderRadius: 32,
         overflow: 'hidden',
-        justifyContent: 'center',
-        alignItems: 'center',
-        shadowColor: '#10B981',
+        marginBottom: 16,
+        shadowColor: '#000',
         shadowOffset: { width: 0, height: 4 },
         shadowOpacity: 0.3,
-        shadowRadius: 12,
+        shadowRadius: 8,
         elevation: 8,
     },
-    aboutBottomTitle: {
-        fontSize: 20,
-        fontWeight: '700',
-        color: COLORS.black,
-        marginBottom: 8,
-        textAlign: 'center',
+    aboutSolutionIconGradient: {
+        width: '100%',
+        height: '100%',
+        justifyContent: 'center',
+        alignItems: 'center',
     },
-    aboutBottomText: {
-        fontSize: 14,
-        color: COLORS.softGreyText,
-        textAlign: 'center',
+    aboutSolutionCardTitle: {
+        fontSize: 24,
+        fontWeight: '800',
+        color: isDarkTheme ? '#FFFFFF' : COLORS.black,
+        marginBottom: 8,
+    },
+    aboutSolutionCardText: {
+        fontSize: 15,
+        fontWeight: '500',
+        color: isDarkTheme ? 'rgba(255, 255, 255, 0.8)' : COLORS.textSecondary,
         lineHeight: 22,
+    },
+    // Stats Section
+    aboutStatsSection: {
+        height: 180,
+        marginHorizontal: 20,
+        marginBottom: 20,
+        borderRadius: 24,
+        overflow: 'hidden',
+        position: 'relative',
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 8 },
+        shadowOpacity: 0.3,
+        shadowRadius: 16,
+        elevation: 12,
+    },
+    aboutStatsImage: {
+        width: '100%',
+        height: '100%',
+        position: 'absolute',
+    },
+    aboutStatsContent: {
+        flex: 1,
+        flexDirection: 'row',
+        justifyContent: 'space-around',
+        alignItems: 'center',
+        paddingHorizontal: 20,
+    },
+    aboutStatItem: {
+        flex: 1,
+        alignItems: 'center',
+    },
+    aboutStatNumber: {
+        fontSize: 32,
+        fontWeight: '900',
+        color: '#FFFFFF',
+        marginBottom: 6,
+        textShadowColor: 'rgba(0, 0, 0, 0.3)',
+        textShadowOffset: { width: 0, height: 2 },
+        textShadowRadius: 8,
+    },
+    aboutStatLabel: {
+        fontSize: 12,
+        fontWeight: '600',
+        color: 'rgba(255, 255, 255, 0.9)',
+        textAlign: 'center',
+        textShadowColor: 'rgba(0, 0, 0, 0.2)',
+        textShadowOffset: { width: 0, height: 1 },
+        textShadowRadius: 4,
+    },
+    aboutStatDivider: {
+        width: 1,
+        height: 60,
+        backgroundColor: 'rgba(255, 255, 255, 0.3)',
     },
     scanContainer: {
         paddingTop: 16,
@@ -5475,27 +5189,33 @@ const createStyles = (COLORS: { primaryBlue: string; deepBlue: string; backgroun
         color: COLORS.backgroundWhite,
     },
     subscriptionModalOverlay: {
-        position: 'absolute',
-        top: 0,
-        left: 0,
-        right: 0,
-        bottom: 0,
-        zIndex: 30,
+        ...StyleSheet.absoluteFillObject,
+        zIndex: 9999,
         justifyContent: 'center',
         alignItems: 'center',
+        backgroundColor: 'transparent',
     },
     subscriptionBackdrop: {
         ...StyleSheet.absoluteFillObject,
-        backgroundColor: 'rgba(0,0,0,0.5)',
+        backgroundColor: 'rgba(0,0,0,0.6)',
     },
     subscriptionModalPanel: {
         width: '90%',
-        maxHeight: '85%',
+        height: '80%', // Fixed height to prevent collapse and ensure footer visibility
         borderRadius: 24,
         overflow: 'hidden',
+        backgroundColor: isDarkTheme ? '#2A2A2A' : '#FFFFFF',
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 10 },
+        shadowOpacity: 0.5,
+        shadowRadius: 20,
+        elevation: 25,
+        borderWidth: isDarkTheme ? 1 : 0,
+        borderColor: isDarkTheme ? 'rgba(255,255,255,0.1)' : 'transparent',
     },
     subscriptionModalContent: {
-        flex: 1,
+        flex: 1, // Now safe to use flex: 1 because parent has fixed height
+        backgroundColor: isDarkTheme ? '#2A2A2A' : '#FFFFFF',
     },
     subscriptionHeader: {
         flexDirection: 'row',
@@ -5503,23 +5223,48 @@ const createStyles = (COLORS: { primaryBlue: string; deepBlue: string; backgroun
         justifyContent: 'space-between',
         padding: 20,
         borderBottomWidth: 1,
-        borderBottomColor: 'rgba(0,0,0,0.05)',
+        borderBottomColor: isDarkTheme ? 'rgba(255,255,255,0.15)' : 'rgba(0,0,0,0.08)',
+        backgroundColor: isDarkTheme ? '#2A2A2A' : '#FFFFFF',
     },
     subscriptionHeaderTitle: {
         fontSize: 22,
         fontWeight: '700',
-        color: COLORS.black,
+        color: isDarkTheme ? '#FFFFFF' : COLORS.black,
     },
     subscriptionScroll: {
         flex: 1,
         padding: 16,
+    },
+    subscriptionFooter: {
+        padding: 20,
+        paddingBottom: 30, // Added extra padding at bottom
+        borderTopWidth: 1,
+        borderTopColor: isDarkTheme ? 'rgba(255,255,255,0.15)' : 'rgba(0,0,0,0.08)',
+        backgroundColor: isDarkTheme ? '#2A2A2A' : '#FFFFFF',
+    },
+    subscriptionButton: {
+        backgroundColor: COLORS.primaryBlue,
+        paddingVertical: 16,
+        borderRadius: 12,
+        alignItems: 'center',
+        shadowColor: COLORS.primaryBlue,
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.3,
+        shadowRadius: 8,
+        elevation: 5,
+    },
+    subscriptionButtonText: {
+        fontSize: 16,
+        fontWeight: '700',
+        color: '#FFFFFF',
     },
     subscriptionCard: {
         marginBottom: 16,
         borderRadius: 16,
         overflow: 'hidden',
         borderWidth: 2,
-        borderColor: 'rgba(0,0,0,0.08)',
+        borderColor: isDarkTheme ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.08)',
+        backgroundColor: isDarkTheme ? '#333333' : '#FFFFFF',
     },
     subscriptionCardSelected: {
         borderColor: '#1A73E8',
@@ -5554,7 +5299,7 @@ const createStyles = (COLORS: { primaryBlue: string; deepBlue: string; backgroun
     subscriptionCardTitle: {
         fontSize: 24,
         fontWeight: '700',
-        color: COLORS.black,
+        color: isDarkTheme ? '#FFFFFF' : COLORS.black,
         marginLeft: 12,
     },
     subscriptionCardPrice: {
@@ -5584,26 +5329,5 @@ const createStyles = (COLORS: { primaryBlue: string; deepBlue: string; backgroun
     subscriptionFeatureText: {
         fontSize: 14,
         color: COLORS.text,
-    },
-    subscriptionFooter: {
-        padding: 20,
-        borderTopWidth: 1,
-        borderTopColor: 'rgba(0,0,0,0.05)',
-    },
-    subscriptionButton: {
-        backgroundColor: COLORS.primaryBlue,
-        paddingVertical: 16,
-        borderRadius: 12,
-        alignItems: 'center',
-        shadowColor: COLORS.primaryBlue,
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.3,
-        shadowRadius: 8,
-        elevation: 5,
-    },
-    subscriptionButtonText: {
-        fontSize: 16,
-        fontWeight: '700',
-        color: '#FFFFFF',
     },
 });

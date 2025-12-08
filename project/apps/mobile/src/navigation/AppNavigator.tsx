@@ -3,25 +3,42 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Text, View } from 'react-native';
 
-import { WelcomeScreen } from '../screens/auth/WelcomeScreen';
-import { LoginScreen } from '../screens/auth/LoginScreen';
-import { SignupScreen } from '../screens/auth/SignupScreen';
-import { VerificationScreen } from '../screens/auth/VerificationScreen';
-import { ForgotPasswordScreen } from '../screens/auth/ForgotPasswordScreen';
+// Note: This navigator is not currently used. The app uses manual navigation in App.tsx
+// These are placeholder components to prevent TypeScript errors
 
 const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
 
 function HomeScreen() {
-    return <View className="flex-1 items-center justify-center bg-white"><Text>Home Screen</Text></View>;
+    return <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: 'white' }}><Text>Home Screen</Text></View>;
 }
 
 function ScanScreen() {
-    return <View className="flex-1 items-center justify-center bg-white"><Text>Scan Screen</Text></View>;
+    return <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: 'white' }}><Text>Scan Screen</Text></View>;
 }
 
 function HistoryScreen() {
-    return <View className="flex-1 items-center justify-center bg-white"><Text>History Screen</Text></View>;
+    return <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: 'white' }}><Text>History Screen</Text></View>;
+}
+
+function WelcomePlaceholder() {
+    return <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: 'white' }}><Text>Welcome Screen</Text></View>;
+}
+
+function LoginPlaceholder() {
+    return <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: 'white' }}><Text>Login Screen</Text></View>;
+}
+
+function SignupPlaceholder() {
+    return <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: 'white' }}><Text>Signup Screen</Text></View>;
+}
+
+function VerificationPlaceholder() {
+    return <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: 'white' }}><Text>Verification Screen</Text></View>;
+}
+
+function ForgotPasswordPlaceholder() {
+    return <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: 'white' }}><Text>Forgot Password Screen</Text></View>;
 }
 
 function TabNavigator() {
@@ -37,11 +54,11 @@ function TabNavigator() {
 function AuthNavigator() {
     return (
         <Stack.Navigator screenOptions={{ headerShown: false }}>
-            <Stack.Screen name="Welcome" component={WelcomeScreen} />
-            <Stack.Screen name="Login" component={LoginScreen} />
-            <Stack.Screen name="Signup" component={SignupScreen} />
-            <Stack.Screen name="Verification" component={VerificationScreen} />
-            <Stack.Screen name="ForgotPassword" component={ForgotPasswordScreen} />
+            <Stack.Screen name="Welcome" component={WelcomePlaceholder} />
+            <Stack.Screen name="Login" component={LoginPlaceholder} />
+            <Stack.Screen name="Signup" component={SignupPlaceholder} />
+            <Stack.Screen name="Verification" component={VerificationPlaceholder} />
+            <Stack.Screen name="ForgotPassword" component={ForgotPasswordPlaceholder} />
         </Stack.Navigator>
     );
 }
