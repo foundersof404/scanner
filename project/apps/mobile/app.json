@@ -1,7 +1,7 @@
 {
     "expo": {
-        "name": "mobile",
-        "slug": "mobile",
+        "name": "SAVR",
+        "slug": "savr",
         "version": "1.0.0",
         "main": "index.js",
         "orientation": "portrait",

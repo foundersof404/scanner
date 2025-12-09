@@ -298,8 +298,9 @@ export function LoadingScreen({ onComplete }: LoadingScreenProps) {
                         colors={['#3B82F6', '#2563EB']}
                         style={styles.logo}
                     >
-                        <Text style={styles.logoText}>P</Text>
+                        <Text style={styles.logoText}>S</Text>
                     </LinearGradient>
+                    <Text style={styles.appName}>SAVR</Text>
                 </Animated.View>
 
                 {/* Language Selector (shows before logo reveal) */}
@@ -389,6 +390,13 @@ const styles = StyleSheet.create({
         fontWeight: '700',
         color: '#FFFFFF',
         letterSpacing: -1,
+    },
+    appName: {
+        fontSize: 32,
+        fontWeight: '800',
+        color: '#1E293B',
+        letterSpacing: 2,
+        marginTop: 16,
     },
     langOverlay: {
         ...StyleSheet.absoluteFillObject,
