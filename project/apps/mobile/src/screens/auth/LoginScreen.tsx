@@ -10,15 +10,18 @@ import {
     TouchableOpacity,
     TextInput,
     Animated,
+    Image,
+    Alert,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { LinearGradient } from 'expo-linear-gradient';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { Button } from '../../components/Button';
-import { Input } from '../../components/Input';
+import { login } from '../../services/api';
+import { signInWithEmailAndPassword, sendEmailVerification } from 'firebase/auth';
+import { auth } from '../../services/firebase';
 
 interface LoginScreenProps {
-    onLoginSuccess: () => void;
+    onLoginSuccess: (userData: { name: string; email: string; token: string }) => void;
     onNavigateToSignup: () => void;
 }
 
@@ -34,17 +37,57 @@ export function LoginScreen({ onLoginSuccess, onNavigateToSignup }: LoginScreenP
     
     const logoFloat = useRef(new Animated.Value(0)).current;
 
-    const handleLogin = () => {
+    const handleLogin = async () => {
+        if (!email || !password) return;
         setLoading(true);
-        // Mock login with delay
-        setTimeout(() => {
-            setLoading(false);
-            // Simple mock validation
-            if (email && password) {
-                console.log('User logged in:', { email });
-                onLoginSuccess();
+        try {
+            // Sign in with Firebase first
+            const userCredential = await signInWithEmailAndPassword(auth, email, password);
+            
+            // Check if email is verified
+            if (!userCredential.user.emailVerified) {
+                Alert.alert(
+                    'Email Not Verified',
+                    'Please verify your email before logging in. Check your inbox for the verification link.',
+                    [
+                        { text: 'Cancel', style: 'cancel' },
+                        {
+                            text: 'Resend Link',
+                            onPress: async () => {
+                                try {
+                                    await sendEmailVerification(userCredential.user);
+                                    Alert.alert('Success', 'Verification email sent!');
+                                } catch (err) {
+                                    Alert.alert('Error', 'Could not send verification email');
+                                }
+                            }
+                        }
+                    ]
+                );
+                setLoading(false);
+                return;
             }
-        }, 1000);
+            
+            // Get Firebase ID token
+            const firebaseToken = await userCredential.user.getIdToken();
+            
+            // Use Firebase data directly
+            // If no displayName is set, prompt user to set it up later in profile
+            const userName = userCredential.user.displayName || 'User';
+            
+            onLoginSuccess({
+                name: userName,
+                email: userCredential.user.email || email,
+                token: firebaseToken,
+            });
+        } catch (err: any) {
+            const message = err?.code === 'auth/invalid-credential' || err?.code === 'auth/wrong-password' || err?.code === 'auth/user-not-found'
+                ? 'Invalid email or password'
+                : err?.message || 'Could not log in';
+            Alert.alert('Login Failed', message);
+        } finally {
+            setLoading(false);
+        }
     };
 
     const handleGoogleLogin = () => {
@@ -110,12 +153,11 @@ export function LoginScreen({ onLoginSuccess, onNavigateToSignup }: LoginScreenP
                                     ]}
                                 >
                                     <View style={styles.logoGlow} />
-                                    <LinearGradient
-                                        colors={['#3B82F6', '#2563EB']}
-                                        style={styles.logo}
-                                    >
-                            <Text style={styles.logoText}>P</Text>
-                                    </LinearGradient>
+                                    <Image
+                                        source={require('../../../assets/logo.jpg')}
+                                        style={styles.logoImage}
+                                        resizeMode="contain"
+                                    />
                                 </Animated.View>
                         <Text style={styles.title}>Welcome Back</Text>
                         <Text style={styles.subtitle}>
@@ -301,11 +343,10 @@ const styles = StyleSheet.create({
         shadowRadius: 16,
         elevation: 10,
     },
-    logoText: {
-        fontSize: 48,
-        fontWeight: '700',
-        color: '#FFFFFF',
-        letterSpacing: -1,
+    logoImage: {
+        width: 120,
+        height: 120,
+        borderRadius: 28,
     },
     passwordToggle: {
         padding: 4,

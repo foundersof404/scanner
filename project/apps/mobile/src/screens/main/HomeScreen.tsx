@@ -25,10 +25,15 @@ import * as ImagePicker from 'expo-image-picker';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
+import { deleteAccount } from '../../services/api';
+import { auth } from '../../services/firebase';
+import { updateProfile, updatePassword, EmailAuthProvider, reauthenticateWithCredential } from 'firebase/auth';
 
 interface HomeScreenProps {
     userName: string;
+    userToken: string;
     onLogout: () => void;
+    onDeleteAccount: () => void;
     initialLanguage?: 'en' | 'ar';
     onNavigateToPayment?: (plan: { name: string; price: string }) => void;
 }
@@ -223,7 +228,7 @@ const translations = {
         reportExported: 'Report exported',
         
         // Other
-        scannerMenu: 'Scanner menu',
+        scannerMenu: 'SAVR menu',
         products: 'products',
         bestDeals: 'best deals',
         found: 'found',
@@ -415,7 +420,7 @@ const translations = {
         reportExported: 'تم تصدير التقرير',
         
         // Other
-        scannerMenu: 'قائمة الماسح',
+        scannerMenu: 'قائمة SAVR',
         products: 'منتجات',
         bestDeals: 'أفضل الصفقات',
         found: 'تم العثور',
@@ -446,7 +451,7 @@ const translations = {
     },
 };
 
-export function HomeScreen({ userName, onLogout, initialLanguage = 'en', onNavigateToPayment }: HomeScreenProps) {
+export function HomeScreen({ userName, userToken, onLogout, onDeleteAccount, initialLanguage = 'en', onNavigateToPayment }: HomeScreenProps) {
     const insets = useSafeAreaInsets();
     const screenWidth = Dimensions.get('window').width;
     const drawerWidth = screenWidth * 0.75;
@@ -541,6 +546,74 @@ export function HomeScreen({ userName, onLogout, initialLanguage = 'en', onNavig
     const [permission, requestCameraPermission] = useCameraPermissions();
     const [lastScannedValue, setLastScannedValue] = useState<string | null>(null);
     const [linkInput, setLinkInput] = useState('');
+    
+    // Edit profile modals
+    const [isEditNameModalOpen, setIsEditNameModalOpen] = useState(false);
+    const [isChangePasswordModalOpen, setIsChangePasswordModalOpen] = useState(false);
+    const [newName, setNewName] = useState(userName);
+    const [currentPassword, setCurrentPassword] = useState('');
+    const [newPassword, setNewPassword] = useState('');
+    const [confirmPassword, setConfirmPassword] = useState('');
+    
+    // Handle name update
+    const handleSaveName = async () => {
+        if (!newName.trim()) {
+            Alert.alert('Error', 'Name cannot be empty');
+            return;
+        }
+        
+        try {
+            const user = auth.currentUser;
+            if (user) {
+                await updateProfile(user, { displayName: newName });
+                Alert.alert('Success', 'Name updated successfully');
+                setIsEditNameModalOpen(false);
+            }
+        } catch (err: any) {
+            Alert.alert('Error', err?.message || 'Could not update name');
+        }
+    };
+    
+    // Handle password change
+    const handleChangePassword = async () => {
+        if (!currentPassword || !newPassword || !confirmPassword) {
+            Alert.alert('Error', 'Please fill in all fields');
+            return;
+        }
+        
+        if (newPassword !== confirmPassword) {
+            Alert.alert('Error', 'New passwords do not match');
+            return;
+        }
+        
+        if (newPassword.length < 6) {
+            Alert.alert('Error', 'Password must be at least 6 characters');
+            return;
+        }
+        
+        try {
+            const user = auth.currentUser;
+            if (user && user.email) {
+                // Re-authenticate user before password change
+                const credential = EmailAuthProvider.credential(user.email, currentPassword);
+                await reauthenticateWithCredential(user, credential);
+                
+                // Update password
+                await updatePassword(user, newPassword);
+                
+                Alert.alert('Success', 'Password changed successfully');
+                setIsChangePasswordModalOpen(false);
+                setCurrentPassword('');
+                setNewPassword('');
+                setConfirmPassword('');
+            }
+        } catch (err: any) {
+            const message = err?.code === 'auth/wrong-password' 
+                ? 'Current password is incorrect'
+                : err?.message || 'Could not change password';
+            Alert.alert('Error', message);
+        }
+    };
     
     
     // Get current theme colors and translations
@@ -1496,7 +1569,7 @@ export function HomeScreen({ userName, onLogout, initialLanguage = 'en', onNavig
                             </TouchableOpacity>
                             
                             <View style={styles.topBarCenter}>
-                                <Text style={styles.topBarTitle}>Scanner</Text>
+                                <Text style={styles.topBarTitle}>SAVR</Text>
                             </View>
                             
                             <TouchableOpacity
@@ -1910,13 +1983,11 @@ export function HomeScreen({ userName, onLogout, initialLanguage = 'en', onNavig
                             <View style={styles.menuContent}>
                                 <View style={styles.menuHeaderRow}>
                                     <View style={styles.menuHeaderLeft}>
-                                        <View style={styles.menuAIIconWrapper}>
-                                            <MaterialCommunityIcons
-                                                name="robot-outline"
-                                                size={24}
-                                                color={COLORS.primaryBlue}
-                                            />
-                                        </View>
+                                        <Image
+                                            source={require('../../../assets/logo.jpg')}
+                                            style={styles.menuLogo}
+                                            resizeMode="contain"
+                                        />
                                         <Text style={styles.menuTitle}>{t.scannerMenu}</Text>
                                     </View>
                                     <Pressable
@@ -2017,6 +2088,47 @@ export function HomeScreen({ userName, onLogout, initialLanguage = 'en', onNavig
                                                     />
                                                 </View>
                                                 <Text style={styles.menuItemText}>{isArabic ? 'تسجيل الدخول' : 'Login'}</Text>
+                                            </View>
+                                        </Pressable>
+                                        <Pressable
+                                            style={({ pressed }) => [
+                                                styles.menuItem,
+                                                pressed && styles.menuItemPressed,
+                                            ]}
+                                            onPress={async () => {
+                                                Alert.alert(
+                                                    'Delete Account',
+                                                    'Are you sure you want to permanently delete your account? This action cannot be undone.',
+                                                    [
+                                                        { text: 'Cancel', style: 'cancel' },
+                                                        {
+                                                            text: 'Delete',
+                                                            style: 'destructive',
+                                                            onPress: async () => {
+                                                                try {
+                                                                    await deleteAccount(userToken);
+                                                                    Alert.alert('Success', 'Your account has been deleted');
+                                                                    onDeleteAccount();
+                                                                } catch (err: any) {
+                                                                    Alert.alert('Error', err?.message || 'Could not delete account');
+                                                                }
+                                                            },
+                                                        },
+                                                    ]
+                                                );
+                                            }}
+                                        >
+                                            <View style={styles.menuItemContent}>
+                                                <View style={styles.menuItemIconWrapper}>
+                                                    <MaterialCommunityIcons
+                                                        name="account-remove"
+                                                        size={20}
+                                                        color="#EF4444"
+                                                    />
+                                                </View>
+                                                <Text style={[styles.menuItemText, styles.menuItemDanger]}>
+                                                    Delete Account
+                                                </Text>
                                             </View>
                                         </Pressable>
                                         <Pressable
@@ -2930,7 +3042,10 @@ export function HomeScreen({ userName, onLogout, initialLanguage = 'en', onNavig
                                 />
                                 <View style={styles.profileSectionContent}>
                                     <Text style={styles.profileSectionTitle}>{t.account}</Text>
-                                    <Pressable style={({ pressed }) => [styles.profileRow, pressed && styles.profileRowPressed]}>
+                                    <Pressable 
+                                        style={({ pressed }) => [styles.profileRow, pressed && styles.profileRowPressed]}
+                                        onPress={() => setIsEditNameModalOpen(true)}
+                                    >
                                         <View style={styles.profileRowLeft}>
                                             <View style={styles.profileRowIcon}>
                                                 <MaterialCommunityIcons
@@ -2948,7 +3063,10 @@ export function HomeScreen({ userName, onLogout, initialLanguage = 'en', onNavig
                                         />
                                     </Pressable>
                                     <View style={styles.profileRowDivider} />
-                                    <Pressable style={({ pressed }) => [styles.profileRow, pressed && styles.profileRowPressed]}>
+                                    <Pressable 
+                                        style={({ pressed }) => [styles.profileRow, pressed && styles.profileRowPressed]}
+                                        onPress={() => setIsChangePasswordModalOpen(true)}
+                                    >
                                         <View style={styles.profileRowLeft}>
                                             <View style={styles.profileRowIcon}>
                                                 <MaterialCommunityIcons
@@ -3139,6 +3257,46 @@ export function HomeScreen({ userName, onLogout, initialLanguage = 'en', onNavig
                                     </View>
                                 </View>
                             </View>
+
+                            {/* Delete Account Button */}
+                            <Pressable
+                                style={({ pressed }) => [
+                                    styles.profileLogoutButton,
+                                    pressed && styles.profileLogoutButtonPressed,
+                                ]}
+                                onPress={async () => {
+                                    Alert.alert(
+                                        'Delete Account',
+                                        'Are you sure you want to permanently delete your account? This action cannot be undone.',
+                                        [
+                                            { text: 'Cancel', style: 'cancel' },
+                                            {
+                                                text: 'Delete',
+                                                style: 'destructive',
+                                                onPress: async () => {
+                                                    try {
+                                                        await deleteAccount(userToken);
+                                                        Alert.alert('Success', 'Your account has been deleted');
+                                                        onDeleteAccount();
+                                                    } catch (err: any) {
+                                                        Alert.alert('Error', err?.message || 'Could not delete account');
+                                                    }
+                                                },
+                                            },
+                                        ]
+                                    );
+                                }}
+                            >
+                                <View style={styles.profileLogoutButtonContent}>
+                                    <MaterialCommunityIcons
+                                        name="account-remove"
+                                        size={20}
+                                        color="#EF4444"
+                                        style={{ marginRight: 8 }}
+                                    />
+                                    <Text style={styles.profileLogoutText}>Delete Account</Text>
+                                </View>
+                            </Pressable>
 
                             {/* Logout Button */}
                             <Pressable
@@ -3490,6 +3648,153 @@ export function HomeScreen({ userName, onLogout, initialLanguage = 'en', onNavig
                                 >
                                     <Text style={styles.subscriptionButtonText}>
                                         {selectedPlan === 'standard' ? 'Continue with Free' : `Subscribe to ${selectedPlan.charAt(0).toUpperCase() + selectedPlan.slice(1)}`}
+                                    </Text>
+                                </TouchableOpacity>
+                            </View>
+                        </View>
+                    </View>
+                </View>
+            </Modal>
+
+            {/* Edit Name Modal */}
+            <Modal
+                animationType="fade"
+                transparent={true}
+                visible={isEditNameModalOpen}
+                onRequestClose={() => setIsEditNameModalOpen(false)}
+            >
+                <View style={styles.subscriptionModalOverlay}>
+                    <TouchableOpacity
+                        style={styles.subscriptionBackdrop}
+                        activeOpacity={1}
+                        onPress={() => setIsEditNameModalOpen(false)}
+                    />
+                    <View style={[styles.subscriptionModalPanel, { maxHeight: 300 }]}>
+                        <View style={styles.subscriptionModalContent}>
+                            <View style={styles.subscriptionHeader}>
+                                <Text style={styles.subscriptionHeaderTitle}>Edit Name</Text>
+                                <TouchableOpacity onPress={() => setIsEditNameModalOpen(false)}>
+                                    <MaterialCommunityIcons name="close" size={24} color={COLORS.softGreyText} />
+                                </TouchableOpacity>
+                            </View>
+                            
+                            <View style={{ padding: 20 }}>
+                                <TextInput
+                                    style={{
+                                        backgroundColor: COLORS.backgroundSecondary,
+                                        borderRadius: 12,
+                                        padding: 16,
+                                        fontSize: 16,
+                                        color: COLORS.text,
+                                        marginBottom: 20
+                                    }}
+                                    placeholder="Enter your name"
+                                    placeholderTextColor={COLORS.textSecondary}
+                                    value={newName}
+                                    onChangeText={setNewName}
+                                />
+                                
+                                <TouchableOpacity
+                                    style={{
+                                        backgroundColor: '#1A73E8',
+                                        borderRadius: 12,
+                                        padding: 16,
+                                        alignItems: 'center'
+                                    }}
+                                    onPress={handleSaveName}
+                                >
+                                    <Text style={{ color: '#fff', fontSize: 16, fontWeight: '600' }}>
+                                        Save Name
+                                    </Text>
+                                </TouchableOpacity>
+                            </View>
+                        </View>
+                    </View>
+                </View>
+            </Modal>
+
+            {/* Change Password Modal */}
+            <Modal
+                animationType="fade"
+                transparent={true}
+                visible={isChangePasswordModalOpen}
+                onRequestClose={() => setIsChangePasswordModalOpen(false)}
+            >
+                <View style={styles.subscriptionModalOverlay}>
+                    <TouchableOpacity
+                        style={styles.subscriptionBackdrop}
+                        activeOpacity={1}
+                        onPress={() => setIsChangePasswordModalOpen(false)}
+                    />
+                    <View style={[styles.subscriptionModalPanel, { maxHeight: 450 }]}>
+                        <View style={styles.subscriptionModalContent}>
+                            <View style={styles.subscriptionHeader}>
+                                <Text style={styles.subscriptionHeaderTitle}>Change Password</Text>
+                                <TouchableOpacity onPress={() => setIsChangePasswordModalOpen(false)}>
+                                    <MaterialCommunityIcons name="close" size={24} color={COLORS.softGreyText} />
+                                </TouchableOpacity>
+                            </View>
+                            
+                            <View style={{ padding: 20 }}>
+                                <TextInput
+                                    style={{
+                                        backgroundColor: COLORS.backgroundSecondary,
+                                        borderRadius: 12,
+                                        padding: 16,
+                                        fontSize: 16,
+                                        color: COLORS.text,
+                                        marginBottom: 16
+                                    }}
+                                    placeholder="Current Password"
+                                    placeholderTextColor={COLORS.textSecondary}
+                                    secureTextEntry
+                                    value={currentPassword}
+                                    onChangeText={setCurrentPassword}
+                                />
+                                
+                                <TextInput
+                                    style={{
+                                        backgroundColor: COLORS.backgroundSecondary,
+                                        borderRadius: 12,
+                                        padding: 16,
+                                        fontSize: 16,
+                                        color: COLORS.text,
+                                        marginBottom: 16
+                                    }}
+                                    placeholder="New Password"
+                                    placeholderTextColor={COLORS.textSecondary}
+                                    secureTextEntry
+                                    value={newPassword}
+                                    onChangeText={setNewPassword}
+                                />
+                                
+                                <TextInput
+                                    style={{
+                                        backgroundColor: COLORS.backgroundSecondary,
+                                        borderRadius: 12,
+                                        padding: 16,
+                                        fontSize: 16,
+                                        color: COLORS.text,
+                                        marginBottom: 20
+                                    }}
+                                    placeholder="Confirm New Password"
+                                    placeholderTextColor={COLORS.textSecondary}
+                                    secureTextEntry
+                                    value={confirmPassword}
+                                    onChangeText={setConfirmPassword}
+                                />
+                                
+                                <TouchableOpacity
+                                    style={{
+                                        backgroundColor: '#1A73E8',
+                                        borderRadius: 12,
+                                        padding: 16,
+                                        alignItems: 'center'
+                                    }}
+                                    onPress={handleChangePassword}
+                                >
+                                    <Text style={{ color: '#fff', fontSize: 16, fontWeight: '600' }}>
+                                        Change Password
                                     </Text>
                                 </TouchableOpacity>
                             </View>
@@ -4721,6 +5026,12 @@ const createStyles = (COLORS: { primaryBlue: string; deepBlue: string; backgroun
         alignItems: 'center',
         justifyContent: 'space-between',
         marginBottom: 28,
+    },
+    menuLogo: {
+        width: 40,
+        height: 40,
+        borderRadius: 12,
+        marginRight: 12,
     },
     menuTitle: {
         fontSize: 26,

@@ -9,17 +9,31 @@ import { LoadingScreen } from './src/screens/LoadingScreen';
 
 type Screen = 'signup' | 'login' | 'loading' | 'home' | 'payment';
 
+interface UserData {
+    name: string;
+    email: string;
+    token: string;
+}
+
 export default function App() {
     const [currentScreen, setCurrentScreen] = useState<Screen>('signup');
-    const [userName, setUserName] = useState('Mhmmd');
+    const [userData, setUserData] = useState<UserData | null>(null);
     const [language, setLanguage] = useState<'en' | 'ar'>('en');
     const [selectedPaymentPlan, setSelectedPaymentPlan] = useState<{ name: string; price: string } | null>(null);
 
-    const handleSignupSuccess = () => {
-        setCurrentScreen('loading');
+    const handleSignupSuccess = (user: UserData) => {
+        setUserData(user);
+        // Skip loading screen for social signups (mock users) and go directly to home
+        if (user.email.includes('@example.com') || user.token.startsWith('mock-')) {
+            setLanguage('en'); // Default to English for social signups
+            setCurrentScreen('home');
+        } else {
+            setCurrentScreen('loading');
+        }
     };
 
-    const handleLoginSuccess = () => {
+    const handleLoginSuccess = (user: UserData) => {
+        setUserData(user);
         setCurrentScreen('loading');
     };
 
@@ -37,6 +51,7 @@ export default function App() {
     };
 
     const handleLogout = () => {
+        setUserData(null);
         setCurrentScreen('login');
     };
 
@@ -75,10 +90,15 @@ export default function App() {
             {currentScreen === 'loading' && (
                 <LoadingScreen onComplete={handleLoadingComplete} />
             )}
-            {currentScreen === 'home' && (
+            {currentScreen === 'home' && userData && (
                 <HomeScreen 
-                    userName={userName} 
-                    onLogout={handleLogout} 
+                    userName={userData.name}
+                    userToken={userData.token}
+                    onLogout={handleLogout}
+                    onDeleteAccount={() => {
+                        setUserData(null);
+                        setCurrentScreen('signup');
+                    }}
                     initialLanguage={language}
                     onNavigateToPayment={handleNavigateToPayment}
                 />
