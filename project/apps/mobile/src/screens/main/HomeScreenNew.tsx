@@ -10,17 +10,13 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { BlurView } from 'expo-blur';
-import { LinearGradient } from 'expo-linear-gradient';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { GestureDetector, Gesture } from 'react-native-gesture-handler';
 import { useTheme } from '../../hooks/useTheme';
 import { useApp } from '../../context/AppContext';
 import { translations } from '../../constants/translations';
 import { HomePage, ScanPage, AboutPage, ProfilePage } from '../pages';
-import { useFilters } from '../../hooks/useFilters';
-import { ErrorBoundary } from '../../components/ErrorBoundary';
-import { MenuDrawer } from '../../components/MenuDrawer';
-import { NotificationPanel } from '../../components/NotificationPanel';
+import { FilterModal } from '../../components/FilterModal';
 
 interface HomeScreenProps {
     userName: string;
@@ -35,13 +31,10 @@ export function HomeScreen({ userName, onLogout, initialLanguage = 'en' }: HomeS
     const { colors, isDark } = useTheme();
     const { language } = useApp();
     const t = translations[language];
-    const { filters, resetFilters } = useFilters();
 
     // Navigation state
     const [activeNav, setActiveNav] = useState<NavItem>('home');
     const [isFilterOpen, setIsFilterOpen] = useState(false);
-    const [isMenuOpen, setIsMenuOpen] = useState(false);
-    const [isNotificationOpen, setIsNotificationOpen] = useState(false);
 
     // Animation values for page transitions
     const homePageOpacity = useRef(new Animated.Value(1)).current;
@@ -94,10 +87,8 @@ export function HomeScreen({ userName, onLogout, initialLanguage = 'en' }: HomeS
         animateToPage(nav);
     };
 
-    // Swipe gesture for page navigation (disabled to prevent conflict with ScrollView)
-    // Users can tap the bottom nav instead
+    // Swipe gesture for page navigation
     const swipeGesture = Gesture.Pan()
-        .enabled(false) // Disable to prevent scrolling conflicts
         .onEnd((event) => {
             const threshold = 50;
             if (event.translationX > threshold) {
@@ -119,10 +110,10 @@ export function HomeScreen({ userName, onLogout, initialLanguage = 'en' }: HomeS
 
     // Navigation items
     const navItems = [
-        { id: 'home' as NavItem, label: t.home, icon: 'home' as const, inactiveIcon: 'home-outline' as const },
-        { id: 'scan' as NavItem, label: t.scan, icon: 'barcode-scan' as const, inactiveIcon: 'barcode-scan' as const },
-        { id: 'about' as NavItem, label: t.about, icon: 'information' as const, inactiveIcon: 'information-outline' as const },
-        { id: 'profile' as NavItem, label: t.profile, icon: 'account' as const, inactiveIcon: 'account-outline' as const },
+        { id: 'home' as NavItem, label: t.home, icon: 'home', inactiveIcon: 'home-outline' },
+        { id: 'scan' as NavItem, label: t.scan, icon: 'barcode-scan', inactiveIcon: 'barcode-scan' },
+        { id: 'about' as NavItem, label: t.about, icon: 'information', inactiveIcon: 'information-outline' },
+        { id: 'profile' as NavItem, label: t.profile, icon: 'account', inactiveIcon: 'account-outline' },
     ];
 
     return (
@@ -130,49 +121,8 @@ export function HomeScreen({ userName, onLogout, initialLanguage = 'en' }: HomeS
             <GestureDetector gesture={swipeGesture}>
                 <Animated.View style={styles.container}>
                     {/* Top Bar */}
-                    <View style={styles.topBarContainer}>
-                        <BlurView
-                            intensity={isDark ? 30 : 35}
-                            tint={isDark ? 'dark' : 'light'}
-                            style={StyleSheet.absoluteFill}
-                        />
-                        <LinearGradient
-                            colors={
-                                isDark
-                                    ? ['rgba(26, 26, 26, 0.85)', 'rgba(31, 31, 31, 0.9)']
-                                    : ['rgba(255, 255, 255, 0.8)', 'rgba(247, 250, 255, 0.75)']
-                            }
-                            start={{ x: 0, y: 0 }}
-                            end={{ x: 0, y: 1 }}
-                            style={StyleSheet.absoluteFill}
-                        />
-                        <View style={[styles.topBar, { borderBottomColor: colors.border }]}>
-                            <TouchableOpacity
-                                onPress={() => setIsMenuOpen(true)}
-                                style={styles.topBarButton}
-                                activeOpacity={0.7}
-                            >
-                                <MaterialCommunityIcons
-                                    name="menu"
-                                    size={24}
-                                    color={colors.text}
-                                />
-                            </TouchableOpacity>
-
-                            <Text style={[styles.appTitle, { color: colors.text }]}>Scanner</Text>
-
-                            <TouchableOpacity
-                                onPress={() => setIsNotificationOpen(true)}
-                                style={styles.topBarButton}
-                                activeOpacity={0.7}
-                            >
-                                <MaterialCommunityIcons
-                                    name="bell-outline"
-                                    size={24}
-                                    color={colors.primaryBlue}
-                                />
-                            </TouchableOpacity>
-                        </View>
+                    <View style={[styles.topBar, { backgroundColor: colors.background, borderBottomColor: colors.border }]}>
+                        <Text style={[styles.appTitle, { color: colors.text }]}>PriceScanner</Text>
                     </View>
 
                     {/* Pages Container */}
@@ -187,13 +137,8 @@ export function HomeScreen({ userName, onLogout, initialLanguage = 'en' }: HomeS
                                 },
                             ]}
                             pointerEvents={activeNav === 'home' ? 'auto' : 'none'}
-                            collapsable={false}
                         >
-                            {activeNav === 'home' && (
-                                <ErrorBoundary>
-                                    <HomePage userName={userName} onFilterPress={() => setIsFilterOpen(true)} />
-                                </ErrorBoundary>
-                            )}
+                            <HomePage userName={userName} onFilterPress={() => setIsFilterOpen(true)} />
                         </Animated.View>
 
                         {/* Scan Page */}
@@ -206,13 +151,8 @@ export function HomeScreen({ userName, onLogout, initialLanguage = 'en' }: HomeS
                                 },
                             ]}
                             pointerEvents={activeNav === 'scan' ? 'auto' : 'none'}
-                            collapsable={false}
                         >
-                            {activeNav === 'scan' && (
-                                <ErrorBoundary>
-                                    <ScanPage />
-                                </ErrorBoundary>
-                            )}
+                            <ScanPage />
                         </Animated.View>
 
                         {/* About Page */}
@@ -225,13 +165,8 @@ export function HomeScreen({ userName, onLogout, initialLanguage = 'en' }: HomeS
                                 },
                             ]}
                             pointerEvents={activeNav === 'about' ? 'auto' : 'none'}
-                            collapsable={false}
                         >
-                            {activeNav === 'about' && (
-                                <ErrorBoundary>
-                                    <AboutPage />
-                                </ErrorBoundary>
-                            )}
+                            <AboutPage />
                         </Animated.View>
 
                         {/* Profile Page */}
@@ -244,13 +179,8 @@ export function HomeScreen({ userName, onLogout, initialLanguage = 'en' }: HomeS
                                 },
                             ]}
                             pointerEvents={activeNav === 'profile' ? 'auto' : 'none'}
-                            collapsable={false}
                         >
-                            {activeNav === 'profile' && (
-                                <ErrorBoundary>
-                                    <ProfilePage userName={userName} onLogout={onLogout} />
-                                </ErrorBoundary>
-                            )}
+                            <ProfilePage userName={userName} onLogout={onLogout} />
                         </Animated.View>
                     </View>
 
@@ -294,57 +224,15 @@ export function HomeScreen({ userName, onLogout, initialLanguage = 'en' }: HomeS
                         </View>
                     </View>
 
-                    {/* Menu Drawer */}
-                    <MenuDrawer
-                        visible={isMenuOpen}
-                        onClose={() => setIsMenuOpen(false)}
-                        onLogout={onLogout}
-                    />
-
-                    {/* Notification Panel */}
-                    <NotificationPanel
-                        visible={isNotificationOpen}
-                        onClose={() => setIsNotificationOpen(false)}
-                    />
-
-                    {/* Filter Modal - Simplified for now */}
-                    {isFilterOpen && (
-                        <Modal
-                            animationType="slide"
-                            transparent={true}
-                            visible={isFilterOpen}
-                            onRequestClose={() => setIsFilterOpen(false)}
-                        >
-                            <View style={styles.filterModalOverlay}>
-                                <TouchableOpacity
-                                    style={styles.filterBackdrop}
-                                    activeOpacity={1}
-                                    onPress={() => setIsFilterOpen(false)}
-                                />
-                                <View style={[styles.filterPanel, { backgroundColor: colors.background }]}>
-                                    <View style={styles.filterHeader}>
-                                        <Text style={[styles.filterTitle, { color: colors.text }]}>{t.filters}</Text>
-                                        <TouchableOpacity onPress={() => setIsFilterOpen(false)}>
-                                            <MaterialCommunityIcons name="close" size={24} color={colors.textSecondary} />
-                                        </TouchableOpacity>
-                                    </View>
-                                    <View style={styles.filterContent}>
-                                        <Text style={[styles.filterMessage, { color: colors.textSecondary }]}>
-                                            Filter options coming soon...
-                                        </Text>
-                                    </View>
-                                    <View style={styles.filterActions}>
-                                        <TouchableOpacity
-                                            style={[styles.filterButton, { backgroundColor: colors.primaryBlue }]}
-                                            onPress={() => setIsFilterOpen(false)}
-                                        >
-                                            <Text style={styles.filterButtonText}>Close</Text>
-                                        </TouchableOpacity>
-                                    </View>
-                                </View>
-                            </View>
-                        </Modal>
-                    )}
+                    {/* Filter Modal */}
+                    <Modal
+                        animationType="slide"
+                        transparent={true}
+                        visible={isFilterOpen}
+                        onRequestClose={() => setIsFilterOpen(false)}
+                    >
+                        <FilterModal onClose={() => setIsFilterOpen(false)} />
+                    </Modal>
                 </Animated.View>
             </GestureDetector>
         </SafeAreaView>
@@ -358,30 +246,15 @@ const styles = StyleSheet.create({
     container: {
         flex: 1,
     },
-    topBarContainer: {
-        height: 60,
-        overflow: 'hidden',
-    },
     topBar: {
-        flex: 1,
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        paddingHorizontal: 16,
-        borderBottomWidth: 1,
-    },
-    topBarButton: {
-        width: 44,
-        height: 44,
-        borderRadius: 22,
+        height: 60,
         justifyContent: 'center',
         alignItems: 'center',
+        borderBottomWidth: 1,
     },
     appTitle: {
         fontSize: 20,
         fontWeight: '700',
-        flex: 1,
-        textAlign: 'center',
     },
     pagesContainer: {
         flex: 1,
@@ -421,55 +294,5 @@ const styles = StyleSheet.create({
         fontWeight: '600',
         textAlign: 'center',
         letterSpacing: 0.2,
-    },
-    filterModalOverlay: {
-        flex: 1,
-        backgroundColor: 'rgba(0, 0, 0, 0.5)',
-        justifyContent: 'flex-end',
-    },
-    filterBackdrop: {
-        flex: 1,
-    },
-    filterPanel: {
-        borderTopLeftRadius: 24,
-        borderTopRightRadius: 24,
-        maxHeight: '80%',
-    },
-    filterHeader: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        padding: 20,
-        borderBottomWidth: 1,
-        borderBottomColor: 'rgba(0, 0, 0, 0.1)',
-    },
-    filterTitle: {
-        fontSize: 22,
-        fontWeight: '700',
-    },
-    filterContent: {
-        padding: 40,
-        alignItems: 'center',
-        justifyContent: 'center',
-    },
-    filterMessage: {
-        fontSize: 16,
-        textAlign: 'center',
-    },
-    filterActions: {
-        padding: 20,
-        borderTopWidth: 1,
-        borderTopColor: 'rgba(0, 0, 0, 0.1)',
-    },
-    filterButton: {
-        height: 50,
-        borderRadius: 12,
-        justifyContent: 'center',
-        alignItems: 'center',
-    },
-    filterButtonText: {
-        fontSize: 16,
-        fontWeight: '700',
-        color: '#FFFFFF',
     },
 });

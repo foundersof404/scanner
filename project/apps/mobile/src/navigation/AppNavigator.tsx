@@ -1,74 +1,79 @@
+import React from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { Text, View } from 'react-native';
+import { useApp } from '../context/AppContext';
 
-// Note: This navigator is not currently used. The app uses manual navigation in App.tsx
-// These are placeholder components to prevent TypeScript errors
+// Screens - HomeScreen has its own custom navigation bar
+import { HomeScreen } from '../screens/main/HomeScreen';
+import { PaymentScreen } from '../screens/main/PaymentScreen';
+import { LoginScreen } from '../screens/auth/LoginScreen';
+import { SignupScreen } from '../screens/auth/SignupScreen';
 
-const Stack = createNativeStackNavigator();
-const Tab = createBottomTabNavigator();
+export type RootStackParamList = {
+    Auth: undefined;
+    Home: undefined;
+    Payment: { planName: string; price: string };
+};
 
-function HomeScreen() {
-    return <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: 'white' }}><Text>Home Screen</Text></View>;
-}
+export type AuthStackParamList = {
+    Login: undefined;
+    Signup: undefined;
+};
 
-function ScanScreen() {
-    return <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: 'white' }}><Text>Scan Screen</Text></View>;
-}
-
-function HistoryScreen() {
-    return <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: 'white' }}><Text>History Screen</Text></View>;
-}
-
-function WelcomePlaceholder() {
-    return <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: 'white' }}><Text>Welcome Screen</Text></View>;
-}
-
-function LoginPlaceholder() {
-    return <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: 'white' }}><Text>Login Screen</Text></View>;
-}
-
-function SignupPlaceholder() {
-    return <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: 'white' }}><Text>Signup Screen</Text></View>;
-}
-
-function VerificationPlaceholder() {
-    return <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: 'white' }}><Text>Verification Screen</Text></View>;
-}
-
-function ForgotPasswordPlaceholder() {
-    return <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: 'white' }}><Text>Forgot Password Screen</Text></View>;
-}
-
-function TabNavigator() {
-    return (
-        <Tab.Navigator>
-            <Tab.Screen name="Home" component={HomeScreen} />
-            <Tab.Screen name="Scan" component={ScanScreen} />
-            <Tab.Screen name="History" component={HistoryScreen} />
-        </Tab.Navigator>
-    );
-}
+const Stack = createNativeStackNavigator<RootStackParamList>();
+const AuthStack = createNativeStackNavigator<AuthStackParamList>();
 
 function AuthNavigator() {
     return (
-        <Stack.Navigator screenOptions={{ headerShown: false }}>
-            <Stack.Screen name="Welcome" component={WelcomePlaceholder} />
-            <Stack.Screen name="Login" component={LoginPlaceholder} />
-            <Stack.Screen name="Signup" component={SignupPlaceholder} />
-            <Stack.Screen name="Verification" component={VerificationPlaceholder} />
-            <Stack.Screen name="ForgotPassword" component={ForgotPasswordPlaceholder} />
-        </Stack.Navigator>
+        <AuthStack.Navigator screenOptions={{ headerShown: false }}>
+            <AuthStack.Screen name="Login" component={LoginScreen} />
+            <AuthStack.Screen name="Signup" component={SignupScreen} />
+        </AuthStack.Navigator>
+    );
+}
+
+// Wrapper component to pass props to HomeScreen
+function HomeScreenWrapper() {
+    const { user, language, setUser } = useApp();
+
+    const handleLogout = () => {
+        setUser(null);
+    };
+
+    const handleNavigateToPayment = (plan: { name: string; price: string }) => {
+        // TODO: Use React Navigation to navigate to payment screen
+        // For now, HomeScreen handles its own modals
+    };
+
+    return (
+        <HomeScreen
+            userName={user?.name || 'User'}
+            onLogout={handleLogout}
+            initialLanguage={language}
+            onNavigateToPayment={handleNavigateToPayment}
+        />
     );
 }
 
 export function AppNavigator() {
+    const { user } = useApp();
+    const isAuthenticated = !!user;
+
     return (
         <NavigationContainer>
             <Stack.Navigator screenOptions={{ headerShown: false }}>
-                <Stack.Screen name="Auth" component={AuthNavigator} />
-                <Stack.Screen name="Main" component={TabNavigator} />
+                {!isAuthenticated ? (
+                    <Stack.Screen name="Auth" component={AuthNavigator} />
+                ) : (
+                    <>
+                        <Stack.Screen name="Home" component={HomeScreenWrapper} />
+                        <Stack.Screen 
+                            name="Payment" 
+                            component={PaymentScreen}
+                            options={{ presentation: 'modal' }}
+                        />
+                    </>
+                )}
             </Stack.Navigator>
         </NavigationContainer>
     );
