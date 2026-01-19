@@ -10,15 +10,18 @@ import {
     TouchableOpacity,
     TextInput,
     Animated,
+    Image,
+    Alert,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { LinearGradient } from 'expo-linear-gradient';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { Button } from '../../components/Button';
-import { Input } from '../../components/Input';
+import { signup } from '../../services/api';
+import { createUserWithEmailAndPassword, sendEmailVerification, updateProfile } from 'firebase/auth';
+import { auth } from '../../services/firebase';
 
 interface SignupScreenProps {
-    onSignupSuccess: () => void;
+    onSignupSuccess: (userData: { name: string; email: string; token: string }) => void;
     onNavigateToLogin: () => void;
 }
 
@@ -36,33 +39,81 @@ export function SignupScreen({ onSignupSuccess, onNavigateToLogin }: SignupScree
     
     const logoFloat = useRef(new Animated.Value(0)).current;
 
-    const handleSignup = () => {
+    const handleSignup = async () => {
+        if (!name || !email || !password) return;
         setLoading(true);
-        // Mock signup with delay
-        setTimeout(() => {
+        try {
+            // Create Firebase user
+            const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+            
+            // Update user profile with name
+            await updateProfile(userCredential.user, {
+                displayName: name,
+            });
+            
+            // Try to send verification email
+            try {
+                await sendEmailVerification(userCredential.user, {
+                    url: 'https://savr-dc54d.firebaseapp.com',
+                    handleCodeInApp: false,
+                });
+                
+                Alert.alert(
+                    'Verify Your Email',
+                    'A verification link has been sent to your email. Please check your inbox and SPAM/JUNK folder. Click the link to verify your account before logging in.',
+                    [{ text: 'OK', onPress: () => onNavigateToLogin() }]
+                );
+            } catch (emailErr: any) {
+                // User created but email failed - still let them know to login later
+                console.error('Email verification error:', emailErr);
+                Alert.alert(
+                    'Account Created',
+                    'Your account was created, but we could not send the verification email. Please try to login and resend the verification link.',
+                    [{ text: 'OK', onPress: () => onNavigateToLogin() }]
+                );
+            }
+        } catch (err: any) {
+            let message = 'Could not create account';
+            if (err?.code === 'auth/email-already-in-use') {
+                message = 'This email is already registered';
+            } else if (err?.code === 'auth/weak-password') {
+                message = 'Password should be at least 6 characters';
+            } else if (err?.code === 'auth/invalid-email') {
+                message = 'Invalid email address';
+            } else if (err?.message) {
+                message = err.message;
+            }
+            Alert.alert('Signup failed', message);
+        } finally {
             setLoading(false);
-            console.log('User signed up:', { name, email });
-            onSignupSuccess();
-        }, 1000);
+        }
     };
 
     const handleGoogleSignup = () => {
         setGoogleLoading(true);
-        // Mock Google signup
+        // Mock Google signup - navigate directly to home
         setTimeout(() => {
             setGoogleLoading(false);
             console.log('User signed up with Google');
-            onSignupSuccess();
+            onSignupSuccess({
+                name: 'Google User',
+                email: 'google.user@example.com',
+                token: 'mock-google-token-' + Date.now()
+            });
         }, 800);
     };
 
     const handleAppleSignup = () => {
         setAppleLoading(true);
-        // Mock Apple signup
+        // Mock Apple signup - navigate directly to home
         setTimeout(() => {
             setAppleLoading(false);
             console.log('User signed up with Apple');
-            onSignupSuccess();
+            onSignupSuccess({
+                name: 'Apple User',
+                email: 'apple.user@example.com',
+                token: 'mock-apple-token-' + Date.now()
+            });
         }, 800);
     };
 
@@ -109,12 +160,11 @@ export function SignupScreen({ onSignupSuccess, onNavigateToLogin }: SignupScree
                                     ]}
                                 >
                                     <View style={styles.logoGlow} />
-                                    <LinearGradient
-                                        colors={['#3B82F6', '#2563EB']}
-                                        style={styles.logo}
-                                    >
-                            <Text style={styles.logoText}>P</Text>
-                                    </LinearGradient>
+                                    <Image
+                                        source={require('../../../assets/logo.jpg')}
+                                        style={styles.logoImage}
+                                        resizeMode="contain"
+                                    />
                                 </Animated.View>
                         <Text style={styles.title}>Create Account</Text>
                         <Text style={styles.subtitle}>
@@ -319,11 +369,10 @@ const styles = StyleSheet.create({
         shadowRadius: 16,
         elevation: 10,
     },
-    logoText: {
-        fontSize: 48,
-        fontWeight: '700',
-        color: '#FFFFFF',
-        letterSpacing: -1,
+    logoImage: {
+        width: 120,
+        height: 120,
+        borderRadius: 28,
     },
     passwordToggle: {
         padding: 4,

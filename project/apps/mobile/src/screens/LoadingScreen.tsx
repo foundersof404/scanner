@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { View, Text, StyleSheet, Animated, Dimensions, TouchableOpacity } from 'react-native';
+import { View, Text, StyleSheet, Animated, Dimensions, TouchableOpacity, Image } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 
 const { width, height } = Dimensions.get('window');
@@ -294,12 +294,11 @@ export function LoadingScreen({ onComplete }: LoadingScreenProps) {
                     ]}
                 >
                     <View style={styles.logoGlow} />
-                    <LinearGradient
-                        colors={['#3B82F6', '#2563EB']}
-                        style={styles.logo}
-                    >
-                        <Text style={styles.logoText}>S</Text>
-                    </LinearGradient>
+                    <Image
+                        source={require('../../assets/logo.jpg')}
+                        style={styles.logoImage}
+                        resizeMode="contain"
+                    />
                     <Text style={styles.appName}>SAVR</Text>
                 </Animated.View>
 
@@ -385,11 +384,10 @@ const styles = StyleSheet.create({
         shadowRadius: 20,
         elevation: 15,
     },
-    logoText: {
-        fontSize: 56,
-        fontWeight: '700',
-        color: '#FFFFFF',
-        letterSpacing: -1,
+    logoImage: {
+        width: 140,
+        height: 140,
+        borderRadius: 32,
     },
     appName: {
         fontSize: 32,
